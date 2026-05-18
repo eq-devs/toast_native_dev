@@ -1,3 +1,7 @@
+## 0.0.2
+
+* Rewrite README with accurate API documentation and clearer structure (no code changes).
+
 ## 0.0.1
 
 * Initial release.

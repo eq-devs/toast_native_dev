@@ -17,7 +17,7 @@ Flutter's standard overlay mechanisms (`OverlayEntry`, `ScaffoldMessenger`, `Ove
 
 ```yaml
 dependencies:
-  toast_native_dev: ^0.0.1
+  toast_native_dev: ^0.0.2
 ```
 
 ```dart
