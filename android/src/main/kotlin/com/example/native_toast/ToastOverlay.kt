@@ -27,13 +27,15 @@ import java.util.UUID
 import kotlinx.coroutines.launch
 
 const val ToastAnimationMs = 450
-private const val ToastSlideFraction = 1.0f
+private const val ToastEnterAnimationMs = 450
+private const val ToastSlideDistancePx = 220
 private val ToastDismissThreshold = 56.dp
 
 // easeOutCubic (decelerating) for enter; its time-reversed mirror for exit.
 // Together they make the exit look like the enter played backwards.
 private val EaseOutCubic = CubicBezierEasing(0.33f, 1f, 0.68f, 1f)
 private val EaseInCubic  = CubicBezierEasing(0.32f, 0f, 0.67f, 0f)
+private val SmoothEnterEasing = FastOutSlowInEasing
 
 data class ToastData(
     val id: String = UUID.randomUUID().toString(),
@@ -55,10 +57,10 @@ fun ToastOverlay(
     onRelease: (id: String) -> Unit,
 ) {
     // Single curve drives both fade and slide; enter = curve forward, exit = curve in reverse.
-    val enterFadeSpec  = tween<Float>(ToastAnimationMs, easing = EaseInCubic)
-    val enterSlideSpec = tween<IntOffset>(ToastAnimationMs, easing = EaseInCubic)
-    val exitFadeSpec   = tween<Float>(ToastAnimationMs, easing = EaseOutCubic)
-    val exitSlideSpec  = tween<IntOffset>(ToastAnimationMs, easing = EaseOutCubic)
+    val enterFadeSpec  = tween<Float>(ToastEnterAnimationMs, easing = SmoothEnterEasing)
+    val enterSlideSpec = tween<IntOffset>(ToastEnterAnimationMs, easing = SmoothEnterEasing)
+    val exitFadeSpec   = tween<Float>(ToastAnimationMs, easing = EaseInCubic)
+    val exitSlideSpec  = tween<IntOffset>(ToastAnimationMs, easing = EaseInCubic)
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -69,12 +71,13 @@ fun ToastOverlay(
         ) {
             toasts.filter { it.position == "top" }.forEach { toast ->
                 key(toast.id) {
+                    var enterVisible by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) { enterVisible = true }
                     val verticalOffset: (Int) -> Int = { height ->
-                        val travel = (height * ToastSlideFraction).toInt()
-                        -travel
+                        -maxOf(height, ToastSlideDistancePx)
                     }
                     AnimatedVisibility(
-                        visible = toast.visible,
+                        visible = toast.visible && enterVisible,
                         enter = fadeIn(enterFadeSpec) +
                                 slideInVertically(enterSlideSpec, initialOffsetY = verticalOffset),
                         exit  = fadeOut(exitFadeSpec) +
@@ -100,12 +103,13 @@ fun ToastOverlay(
             // Reversed so newest toast is closest to the bottom edge
             toasts.filter { it.position == "bottom" }.reversed().forEach { toast ->
                 key(toast.id) {
+                    var enterVisible by remember { mutableStateOf(false) }
+                    LaunchedEffect(Unit) { enterVisible = true }
                     val verticalOffset: (Int) -> Int = { height ->
-                        val travel = (height * ToastSlideFraction).toInt()
-                        travel
+                        maxOf(height, ToastSlideDistancePx)
                     }
                     AnimatedVisibility(
-                        visible = toast.visible,
+                        visible = toast.visible && enterVisible,
                         enter = fadeIn(enterFadeSpec) +
                                 slideInVertically(enterSlideSpec, initialOffsetY = verticalOffset),
                         exit  = fadeOut(exitFadeSpec) +
