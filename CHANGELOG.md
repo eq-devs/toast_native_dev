@@ -1,3 +1,7 @@
+## 0.0.4
+
+* Correct README and package description wording around Flutter overlays and native platform views.
+
 ## 0.0.3
 
 * Sync README with the current API, MethodChannel name, and platform implementation.

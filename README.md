@@ -1,14 +1,14 @@
 # toast_native_dev
 
-Native toast notifications for Flutter that render above Flutter widgets and native WebViews.
+Native toast notifications for Flutter that render above Flutter widgets and platform views.
 
-The plugin does not use Flutter `OverlayEntry`, `ScaffoldMessenger`, or `Overlay.of(...)` for rendering. Toasts are drawn by the native platform layer so they can stay visible above Hybrid Composition WebViews.
+The plugin does not use Flutter `OverlayEntry`, `ScaffoldMessenger`, or `Overlay.of(...)` for rendering. Toasts are drawn by the native platform layer so they can stay visible above native views that may cover Flutter-rendered overlays.
 
 [![pub package](https://img.shields.io/pub/v/toast_native_dev.svg)](https://pub.dev/packages/toast_native_dev)
 
 ## Why
 
-Flutter overlays can be covered by native views such as `webview_flutter` WebViews. This package avoids that by rendering toasts outside Flutter's widget overlay stack:
+Flutter toasts and overlays work normally above Flutter widgets. The problem starts when a screen contains native platform views: those views can sit outside or above Flutter's overlay stack, depending on the platform and composition mode. This package avoids that layer ordering issue by rendering toasts through native overlay surfaces:
 
 | Platform | Native rendering layer |
 |---|---|
@@ -21,7 +21,7 @@ Touches outside the toast pass through to the Flutter app, so the page remains u
 
 ```yaml
 dependencies:
-  toast_native_dev: ^0.0.3
+  toast_native_dev: ^0.0.4
 ```
 
 ```dart
@@ -205,7 +205,7 @@ iOS code lives in:
 ios/Classes/NativeToastPlugin.swift
 ```
 
-Each toast gets its own passthrough `UIWindow` attached to the active `UIWindowScene`. The window is above Flutter and native WebViews, while touches outside the toast pass through to the app.
+Each toast gets its own passthrough `UIWindow` attached to the active `UIWindowScene`. The window is above Flutter and native platform views, while touches outside the toast pass through to the app.
 
 ## Development
 
