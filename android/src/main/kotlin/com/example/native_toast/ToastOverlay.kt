@@ -27,14 +27,10 @@ import java.util.UUID
 import kotlinx.coroutines.launch
 
 const val ToastAnimationMs = 450
-private const val ToastEnterAnimationMs = 450
 private const val ToastSlideDistancePx = 220
 private val ToastDismissThreshold = 56.dp
 
-// easeOutCubic (decelerating) for enter; its time-reversed mirror for exit.
-// Together they make the exit look like the enter played backwards.
-private val EaseOutCubic = CubicBezierEasing(0.33f, 1f, 0.68f, 1f)
-private val EaseInCubic  = CubicBezierEasing(0.32f, 0f, 0.67f, 0f)
+private val EaseInCubic       = CubicBezierEasing(0.32f, 0f, 0.67f, 0f)
 private val SmoothEnterEasing = FastOutSlowInEasing
 
 data class ToastData(
@@ -57,8 +53,8 @@ fun ToastOverlay(
     onRelease: (id: String) -> Unit,
 ) {
     // Single curve drives both fade and slide; enter = curve forward, exit = curve in reverse.
-    val enterFadeSpec  = tween<Float>(ToastEnterAnimationMs, easing = SmoothEnterEasing)
-    val enterSlideSpec = tween<IntOffset>(ToastEnterAnimationMs, easing = SmoothEnterEasing)
+    val enterFadeSpec  = tween<Float>(ToastAnimationMs, easing = SmoothEnterEasing)
+    val enterSlideSpec = tween<IntOffset>(ToastAnimationMs, easing = SmoothEnterEasing)
     val exitFadeSpec   = tween<Float>(ToastAnimationMs, easing = EaseInCubic)
     val exitSlideSpec  = tween<IntOffset>(ToastAnimationMs, easing = EaseInCubic)
 
@@ -148,13 +144,18 @@ fun ToastItem(
     val dragOffset = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
 
+    // Golden ratio (φ ≈ 1.618) proportions:
+    //   horizontal(16) / vertical(10) ≈ φ
+    //   icon(20) / gap(12) ≈ φ
+    //   cornerRadius(16) = horizontal padding = base × φ
+    //   elevation(6) = base / φ
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer { translationY = dragOffset.value }
-            .shadow(elevation = 8.dp, shape = RoundedCornerShape(14.dp))
-            .background(bgColor, RoundedCornerShape(14.dp))
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .shadow(elevation = 6.dp, shape = RoundedCornerShape(16.dp))
+            .background(bgColor, RoundedCornerShape(16.dp))
+            .padding(horizontal = 16.dp, vertical = 10.dp)
             // Hold detection: fires immediately on finger-down, pauses the auto-dismiss timer.
             .pointerInput(onHold, onRelease) {
                 awaitEachGesture {
@@ -213,12 +214,13 @@ fun ToastItem(
     ) {
         if (toast.icon != "none") {
             ToastIcon(type = toast.icon, color = iconColor)
-            Spacer(modifier = Modifier.width(10.dp))
+            Spacer(modifier = Modifier.width(12.dp))  // 20 / φ ≈ 12.36
         }
         Text(
             text = toast.message,
             color = Color.White,
             fontSize = 14.sp,
+            lineHeight = 22.sp,  // 14 × φ ≈ 22.65
             fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f),
         )
@@ -227,7 +229,7 @@ fun ToastItem(
 
 @Composable
 private fun ToastIcon(type: String, color: Color) {
-    Canvas(modifier = Modifier.size(24.dp)) {
+    Canvas(modifier = Modifier.size(20.dp)) {
         val strokeWidth = 2.4.dp.toPx()
         val stroke = Stroke(width = strokeWidth, cap = StrokeCap.Round)
         val center = this.center
