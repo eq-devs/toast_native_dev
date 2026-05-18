@@ -4,7 +4,8 @@ import UIKit
 public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDelegate {
 
     private var activeToasts: [ToastEntry] = []
-    private let toastAnimationOffset: CGFloat = 220
+    // Matches Android: ToastSlideDistance = 72.dp, ToastDismissThreshold = 56.dp, ToastAnimationMs = 450.
+    private let toastAnimationOffset: CGFloat = 72
     private let toastDismissThreshold: CGFloat = 56
     private let toastAnimationDuration: TimeInterval = 0.45
 
@@ -67,7 +68,9 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         duration: TimeInterval, color: UIColor?, icon: String, iconColor: UIColor,
         dismissDirection: String
     ) {
-        let screenBounds = currentScreenBounds()
+        guard let scene = activeWindowScene() else { return }
+
+        let screenBounds = scene.coordinateSpace.bounds
         let maxWidth = screenBounds.width - 32
 
         let containerView = buildToastView(type: type, message: message, color: color,
@@ -82,16 +85,20 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         let toastWidth = maxWidth
         let toastHeight = max(fittingSize.height, 40)
 
-        let stackedOffset = stackOffset(for: position, height: toastHeight)
-        let marginFromEdge: CGFloat = 64
+        let stackedOffset = stackOffset(for: position)
+        let safeInsets = scene.windows.first(where: { $0.isKeyWindow })?.safeAreaInsets ?? .zero
+        let edgeMargin: CGFloat = 64
+        let topMargin = max(edgeMargin, safeInsets.top + 16)
+        let bottomMargin = max(edgeMargin, safeInsets.bottom + 16)
         let xPos = (screenBounds.width - toastWidth) / 2
         let yPos: CGFloat = position == "top"
-            ? marginFromEdge + stackedOffset
-            : screenBounds.height - marginFromEdge - toastHeight - stackedOffset
+            ? topMargin + stackedOffset
+            : screenBounds.height - bottomMargin - toastHeight - stackedOffset
 
         containerView.frame = CGRect(x: xPos, y: yPos, width: toastWidth, height: toastHeight)
 
-        let toastWindow = makeToastWindow(frame: screenBounds)
+        let toastWindow = PassthroughWindow(windowScene: scene)
+        toastWindow.frame = screenBounds
         toastWindow.windowLevel = UIWindow.Level.alert + 1
         toastWindow.backgroundColor = .clear
         toastWindow.isUserInteractionEnabled = true
@@ -238,8 +245,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     // ─── Enter / exit animations ─────────────────────────────────────────────
 
     private func animateIn(view: UIView, position: String) {
-        let distance = max(view.bounds.height, toastAnimationOffset)
-        let offset = position == "top" ? -distance : distance
+        let offset = animationOffset(for: view, position: position)
         view.transform = CGAffineTransform(translationX: 0, y: offset)
         view.alpha = 0
         UIView.animate(
@@ -254,8 +260,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     }
 
     private func animateOut(view: UIView, position: String, completion: @escaping () -> Void) {
-        let distance = max(view.bounds.height, toastAnimationOffset)
-        let offset = position == "top" ? -distance : distance
+        let offset = animationOffset(for: view, position: position)
         UIView.animate(
             withDuration: toastAnimationDuration,
             delay: 0,
@@ -266,6 +271,17 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
             },
             completion: { _ in completion() }
         )
+    }
+
+    private func animationOffset(for view: UIView, position: String) -> CGFloat {
+        guard let superview = view.superview else {
+            return position == "top" ? -toastAnimationOffset : toastAnimationOffset
+        }
+
+        if position == "top" {
+            return -max(view.frame.maxY, toastAnimationOffset)
+        }
+        return max(superview.bounds.height - view.frame.minY, toastAnimationOffset)
     }
 
     // ─── Dismiss ─────────────────────────────────────────────────────────────
@@ -285,7 +301,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
 
     // ─── Stacking ─────────────────────────────────────────────────────────────
 
-    private func stackOffset(for position: String, height: CGFloat) -> CGFloat {
+    private func stackOffset(for position: String) -> CGFloat {
         if position == "bottom" {
             return 0
         }
@@ -294,10 +310,14 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     }
 
     private func rebuildOffsets() {
-        let screenBounds = currentScreenBounds()
-        let margin: CGFloat = 64
+        guard let scene = activeWindowScene() else { return }
+        let screenBounds = scene.coordinateSpace.bounds
+        let safeInsets = scene.windows.first(where: { $0.isKeyWindow })?.safeAreaInsets ?? .zero
+        let edgeMargin: CGFloat = 64
+        let topMargin = max(edgeMargin, safeInsets.top + 16)
+        let bottomMargin = max(edgeMargin, safeInsets.bottom + 16)
 
-        var topOffset = margin
+        var topOffset = topMargin
         for e in activeToasts.filter({ $0.position == "top" }) {
             var frame = e.containerView.frame
             frame.origin.y = topOffset
@@ -305,7 +325,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
             topOffset += frame.height + 8
         }
 
-        var bottomOffset = margin
+        var bottomOffset = bottomMargin
         for e in activeToasts.filter({ $0.position == "bottom" }).reversed() {
             var frame = e.containerView.frame
             frame.origin.y = screenBounds.height - bottomOffset - frame.height
@@ -426,28 +446,10 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         )
     }
 
-    private func currentScreenBounds() -> CGRect {
-        if #available(iOS 13.0, *), let scene = activeWindowScene() {
-            return scene.coordinateSpace.bounds
-        }
-        return UIScreen.main.bounds
-    }
-
-    private func makeToastWindow(frame: CGRect) -> UIWindow {
-        if #available(iOS 13.0, *), let scene = activeWindowScene() {
-            let window = PassthroughWindow(windowScene: scene)
-            window.frame = frame
-            return window
-        }
-        return PassthroughWindow(frame: frame)
-    }
-
-    @available(iOS 13.0, *)
     private func activeWindowScene() -> UIWindowScene? {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         return scenes.first { $0.activationState == .foregroundActive }
             ?? scenes.first { $0.activationState == .foregroundInactive }
-            ?? UIApplication.shared.windows.first(where: { !$0.isHidden })?.windowScene
     }
 }
 

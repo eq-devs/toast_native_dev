@@ -2,8 +2,8 @@ package com.example.native_toast
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -14,10 +14,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -27,7 +29,7 @@ import java.util.UUID
 import kotlinx.coroutines.launch
 
 const val ToastAnimationMs = 450
-private const val ToastSlideDistancePx = 220
+private val ToastSlideDistance   = 72.dp
 private val ToastDismissThreshold = 56.dp
 
 private val EaseInCubic       = CubicBezierEasing(0.32f, 0f, 0.67f, 0f)
@@ -52,11 +54,16 @@ fun ToastOverlay(
     onHold: (id: String) -> Unit,
     onRelease: (id: String) -> Unit,
 ) {
-    // Single curve drives both fade and slide; enter = curve forward, exit = curve in reverse.
+    // Enter: smooth ease-in-out for a natural arrival. Exit: accelerating ease-in.
+    // Fade and slide share the same curve in each phase so they move in lockstep.
     val enterFadeSpec  = tween<Float>(ToastAnimationMs, easing = SmoothEnterEasing)
     val enterSlideSpec = tween<IntOffset>(ToastAnimationMs, easing = SmoothEnterEasing)
     val exitFadeSpec   = tween<Float>(ToastAnimationMs, easing = EaseInCubic)
     val exitSlideSpec  = tween<IntOffset>(ToastAnimationMs, easing = EaseInCubic)
+
+    // Resolve dp → px once at the composable level so the slide distance is consistent
+    // across screen densities (was previously hard-coded raw pixels).
+    val slideDistancePx = with(LocalDensity.current) { ToastSlideDistance.roundToPx() }
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
@@ -67,25 +74,17 @@ fun ToastOverlay(
         ) {
             toasts.filter { it.position == "top" }.forEach { toast ->
                 key(toast.id) {
-                    var enterVisible by remember { mutableStateOf(false) }
-                    LaunchedEffect(Unit) { enterVisible = true }
-                    val verticalOffset: (Int) -> Int = { height ->
-                        -maxOf(height, ToastSlideDistancePx)
-                    }
-                    AnimatedVisibility(
-                        visible = toast.visible && enterVisible,
-                        enter = fadeIn(enterFadeSpec) +
-                                slideInVertically(enterSlideSpec, initialOffsetY = verticalOffset),
-                        exit  = fadeOut(exitFadeSpec) +
-                                slideOutVertically(exitSlideSpec, targetOffsetY = verticalOffset),
-                    ) {
-                        ToastItem(
-                            toast = toast,
-                            onDismiss = { onDismiss(toast.id) },
-                            onHold = { onHold(toast.id) },
-                            onRelease = { onRelease(toast.id) },
-                        )
-                    }
+                    ToastSlot(
+                        toast = toast,
+                        verticalOffset = { height -> -maxOf(height, slideDistancePx) },
+                        enterFadeSpec = enterFadeSpec,
+                        enterSlideSpec = enterSlideSpec,
+                        exitFadeSpec = exitFadeSpec,
+                        exitSlideSpec = exitSlideSpec,
+                        onDismiss = onDismiss,
+                        onHold = onHold,
+                        onRelease = onRelease,
+                    )
                 }
             }
         }
@@ -99,28 +98,51 @@ fun ToastOverlay(
             // Reversed so newest toast is closest to the bottom edge
             toasts.filter { it.position == "bottom" }.reversed().forEach { toast ->
                 key(toast.id) {
-                    var enterVisible by remember { mutableStateOf(false) }
-                    LaunchedEffect(Unit) { enterVisible = true }
-                    val verticalOffset: (Int) -> Int = { height ->
-                        maxOf(height, ToastSlideDistancePx)
-                    }
-                    AnimatedVisibility(
-                        visible = toast.visible && enterVisible,
-                        enter = fadeIn(enterFadeSpec) +
-                                slideInVertically(enterSlideSpec, initialOffsetY = verticalOffset),
-                        exit  = fadeOut(exitFadeSpec) +
-                                slideOutVertically(exitSlideSpec, targetOffsetY = verticalOffset),
-                    ) {
-                        ToastItem(
-                            toast = toast,
-                            onDismiss = { onDismiss(toast.id) },
-                            onHold = { onHold(toast.id) },
-                            onRelease = { onRelease(toast.id) },
-                        )
-                    }
+                    ToastSlot(
+                        toast = toast,
+                        verticalOffset = { height -> maxOf(height, slideDistancePx) },
+                        enterFadeSpec = enterFadeSpec,
+                        enterSlideSpec = enterSlideSpec,
+                        exitFadeSpec = exitFadeSpec,
+                        exitSlideSpec = exitSlideSpec,
+                        onDismiss = onDismiss,
+                        onHold = onHold,
+                        onRelease = onRelease,
+                    )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ToastSlot(
+    toast: ToastData,
+    verticalOffset: (Int) -> Int,
+    enterFadeSpec: FiniteAnimationSpec<Float>,
+    enterSlideSpec: FiniteAnimationSpec<IntOffset>,
+    exitFadeSpec: FiniteAnimationSpec<Float>,
+    exitSlideSpec: FiniteAnimationSpec<IntOffset>,
+    onDismiss: (id: String) -> Unit,
+    onHold: (id: String) -> Unit,
+    onRelease: (id: String) -> Unit,
+) {
+    var enterVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { enterVisible = true }
+
+    AnimatedVisibility(
+        visible = toast.visible && enterVisible,
+        enter = fadeIn(enterFadeSpec) +
+                slideInVertically(enterSlideSpec, initialOffsetY = verticalOffset),
+        exit  = fadeOut(exitFadeSpec) +
+                slideOutVertically(exitSlideSpec, targetOffsetY = verticalOffset),
+    ) {
+        ToastItem(
+            toast = toast,
+            onDismiss = { onDismiss(toast.id) },
+            onHold = { onHold(toast.id) },
+            onRelease = { onRelease(toast.id) },
+        )
     }
 }
 
@@ -157,7 +179,8 @@ fun ToastItem(
             .background(bgColor, RoundedCornerShape(16.dp))
             .padding(horizontal = 16.dp, vertical = 10.dp)
             // Hold detection: fires immediately on finger-down, pauses the auto-dismiss timer.
-            .pointerInput(onHold, onRelease) {
+            // Keyed on toast.id so the gesture pipeline is set up once and survives recomposition.
+            .pointerInput(toast.id) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
                     onHold()
@@ -169,7 +192,8 @@ fun ToastItem(
                 }
             }
             // Drag: moves the toast visually; dismisses past threshold or springs back.
-            .pointerInput(dismissDir, onDismiss) {
+            // Keyed on toast.id + dismissDir — both stable for this slot.
+            .pointerInput(toast.id, dismissDir) {
                 var totalDrag = 0f
                 detectVerticalDragGestures(
                     onDragStart = {

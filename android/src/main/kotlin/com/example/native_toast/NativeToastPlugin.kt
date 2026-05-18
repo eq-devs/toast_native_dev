@@ -145,7 +145,12 @@ class NativeToastPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             pausedRemaining.clear()
 
             composeView?.let { view ->
-                (view.parent as? ViewGroup)?.removeView(view)
+                val parent = view.parent as? ViewGroup
+                parent?.removeView(view)
+                // Clear the ViewTree owners we stamped on the DecorView so we don't
+                // leak `toastOwner` across activity-detach cycles.
+                parent?.setViewTreeLifecycleOwner(null)
+                parent?.setViewTreeSavedStateRegistryOwner(null)
             }
             composeView = null
             toasts.clear()
@@ -231,7 +236,9 @@ class NativeToastPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         val idx = toasts.indexOfFirst { it.id == id }
         if (idx < 0) return
         toasts[idx] = toasts[idx].copy(visible = false)
-        mainHandler.postDelayed({ toasts.removeAll { it.id == id } }, ToastAnimationMs.toLong())
+        // +50ms buffer past the nominal exit-animation length so the toast isn't
+        // pulled from the list mid-animation under JVM/GC jitter.
+        mainHandler.postDelayed({ toasts.removeAll { it.id == id } }, ToastAnimationMs + 50L)
     }
 
     private fun durationFor(length: String): Long = when (length) {
