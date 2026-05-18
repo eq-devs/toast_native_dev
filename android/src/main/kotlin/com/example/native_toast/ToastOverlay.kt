@@ -14,7 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
+import Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -127,11 +127,14 @@ private fun ToastSlot(
     onHold: (id: String) -> Unit,
     onRelease: (id: String) -> Unit,
 ) {
-    var enterVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) { enterVisible = true }
+    // initialState = false so the first transition plays as an enter animation.
+    // targetState is rebound every composition from toast.visible, so a dismiss
+    // (visible = false) drives the exit transition without an empty-frame stutter.
+    val visibilityState = remember { MutableTransitionState(initialState = false) }
+    visibilityState.targetState = toast.visible
 
     AnimatedVisibility(
-        visible = toast.visible && enterVisible,
+        visibleState = visibilityState,
         enter = fadeIn(enterFadeSpec) +
                 slideInVertically(enterSlideSpec, initialOffsetY = verticalOffset),
         exit  = fadeOut(exitFadeSpec) +
@@ -163,7 +166,12 @@ fun ToastItem(
     val iconColor = Color(toast.iconColor ?: 0xFFFFFFFF)
     val dismissDir = toast.dismissDirection
 
-    val dragOffset = remember { Animatable(0f) }
+    // Plain mutable float for the live drag position — written directly during
+    // pointer events, avoiding a coroutine launch per frame.
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    // Animatable used only for the spring-back; its animateTo block writes back
+    // into dragOffset so a single state still drives graphicsLayer.
+    val springBack = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
 
     // Golden ratio (φ ≈ 1.618), base unit = 12dp:
@@ -175,7 +183,7 @@ fun ToastItem(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .graphicsLayer { translationY = dragOffset.value }
+            .graphicsLayer { translationY = dragOffset }
             .shadow(elevation = 6.dp, shape = RoundedCornerShape(16.dp))
             .background(bgColor, RoundedCornerShape(16.dp))
             .padding(horizontal = 20.dp, vertical = 12.dp)
@@ -199,7 +207,7 @@ fun ToastItem(
                 detectVerticalDragGestures(
                     onDragStart = {
                         // Stop any ongoing spring-back so the view follows the finger cleanly.
-                        scope.launch { dragOffset.stop() }
+                        scope.launch { springBack.stop() }
                     },
                     onDragEnd = {
                         val threshold = ToastDismissThreshold.toPx()
@@ -209,30 +217,34 @@ fun ToastItem(
                             onDismiss()
                         } else {
                             scope.launch {
-                                dragOffset.animateTo(
+                                springBack.snapTo(dragOffset)
+                                springBack.animateTo(
                                     targetValue = 0f,
                                     animationSpec = spring(
                                         dampingRatio = Spring.DampingRatioMediumBouncy,
                                         stiffness = Spring.StiffnessMediumLow,
                                     ),
-                                )
+                                ) { dragOffset = value }
                             }
                         }
                         totalDrag = 0f
                     },
                     onDragCancel = {
-                        scope.launch { dragOffset.animateTo(0f, spring()) }
+                        scope.launch {
+                            springBack.snapTo(dragOffset)
+                            springBack.animateTo(0f, spring()) { dragOffset = value }
+                        }
                         totalDrag = 0f
                     },
                 ) { _, dragAmount ->
                     totalDrag += dragAmount
-                    // Clamp to dismiss direction — resist dragging the "wrong" way.
-                    val newOffset = if (dismissDir == "up") {
-                        (dragOffset.value + dragAmount).coerceAtMost(0f)
+                    // Direct state write — no per-event coroutine. Clamped so
+                    // the toast can only travel toward its dismiss edge.
+                    dragOffset = if (dismissDir == "up") {
+                        (dragOffset + dragAmount).coerceAtMost(0f)
                     } else {
-                        (dragOffset.value + dragAmount).coerceAtLeast(0f)
+                        (dragOffset + dragAmount).coerceAtLeast(0f)
                     }
-                    scope.launch { dragOffset.snapTo(newOffset) }
                 }
             },
         verticalAlignment = Alignment.CenterVertically,
@@ -265,15 +277,15 @@ private fun ToastIcon(type: String, color: Color) {
             "success" -> {
                 drawLine(
                     color = color,
-                    start = androidx.compose.ui.geometry.Offset(size.width * 0.28f, size.height * 0.52f),
-                    end = androidx.compose.ui.geometry.Offset(size.width * 0.43f, size.height * 0.68f),
+                    start = Offset(size.width * 0.28f, size.height * 0.52f),
+                    end = Offset(size.width * 0.43f, size.height * 0.68f),
                     strokeWidth = strokeWidth,
                     cap = StrokeCap.Round,
                 )
                 drawLine(
                     color = color,
-                    start = androidx.compose.ui.geometry.Offset(size.width * 0.43f, size.height * 0.68f),
-                    end = androidx.compose.ui.geometry.Offset(size.width * 0.73f, size.height * 0.35f),
+                    start = Offset(size.width * 0.43f, size.height * 0.68f),
+                    end = Offset(size.width * 0.73f, size.height * 0.35f),
                     strokeWidth = strokeWidth,
                     cap = StrokeCap.Round,
                 )
@@ -282,15 +294,15 @@ private fun ToastIcon(type: String, color: Color) {
             "error" -> {
                 drawLine(
                     color = color,
-                    start = androidx.compose.ui.geometry.Offset(size.width * 0.35f, size.height * 0.35f),
-                    end = androidx.compose.ui.geometry.Offset(size.width * 0.65f, size.height * 0.65f),
+                    start = Offset(size.width * 0.35f, size.height * 0.35f),
+                    end = Offset(size.width * 0.65f, size.height * 0.65f),
                     strokeWidth = strokeWidth,
                     cap = StrokeCap.Round,
                 )
                 drawLine(
                     color = color,
-                    start = androidx.compose.ui.geometry.Offset(size.width * 0.65f, size.height * 0.35f),
-                    end = androidx.compose.ui.geometry.Offset(size.width * 0.35f, size.height * 0.65f),
+                    start = Offset(size.width * 0.65f, size.height * 0.35f),
+                    end = Offset(size.width * 0.35f, size.height * 0.65f),
                     strokeWidth = strokeWidth,
                     cap = StrokeCap.Round,
                 )
@@ -299,12 +311,12 @@ private fun ToastIcon(type: String, color: Color) {
             else -> {
                 drawLine(
                     color = color,
-                    start = androidx.compose.ui.geometry.Offset(center.x, size.height * 0.42f),
-                    end = androidx.compose.ui.geometry.Offset(center.x, size.height * 0.70f),
+                    start = Offset(center.x, size.height * 0.42f),
+                    end = Offset(center.x, size.height * 0.70f),
                     strokeWidth = strokeWidth,
                     cap = StrokeCap.Round,
                 )
-                drawCircle(color = color, radius = strokeWidth / 2, center = androidx.compose.ui.geometry.Offset(center.x, size.height * 0.30f))
+                drawCircle(color = color, radius = strokeWidth / 2, center = Offset(center.x, size.height * 0.30f))
             }
         }
     }

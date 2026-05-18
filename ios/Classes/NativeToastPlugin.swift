@@ -299,6 +299,9 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     private func dismissToast(entry: ToastEntry) {
         guard activeToasts.contains(where: { $0.window === entry.window }) else { return }
         entry.dismissWorkItem?.cancel()
+        // Lock out further touches so an active pan/hold can't keep writing
+        // .transform mid-animation and fight the slide-off.
+        entry.containerView.isUserInteractionEnabled = false
         animateOut(view: entry.containerView, position: entry.position) { [weak self] in
             DispatchQueue.main.async {
                 guard let self = self else { return }
@@ -327,14 +330,27 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         let topMargin = max(edgeMargin, safeInsets.top + 16)
         let bottomMargin = max(edgeMargin, safeInsets.bottom + 16)
 
+        // Partition once instead of filtering twice.
+        var topToasts: [ToastEntry] = []
+        var bottomToasts: [ToastEntry] = []
+        topToasts.reserveCapacity(activeToasts.count)
+        bottomToasts.reserveCapacity(activeToasts.count)
+        for entry in activeToasts {
+            if entry.position == "top" {
+                topToasts.append(entry)
+            } else {
+                bottomToasts.append(entry)
+            }
+        }
+
         var topOffset = topMargin
-        for e in activeToasts.filter({ $0.position == "top" }) {
+        for e in topToasts {
             reposition(e.containerView, toOriginY: topOffset)
             topOffset += e.containerView.bounds.height + 8
         }
 
         var bottomOffset = bottomMargin
-        for e in activeToasts.filter({ $0.position == "bottom" }).reversed() {
+        for e in bottomToasts.reversed() {
             let targetY = screenBounds.height - bottomOffset - e.containerView.bounds.height
             reposition(e.containerView, toOriginY: targetY)
             bottomOffset += e.containerView.bounds.height + 8
@@ -545,8 +561,11 @@ private class ToastIconView: UIView {
 // ─── Associated object keys ───────────────────────────────────────────────────
 
 private enum AssociatedKeys {
-    static var entry     = "toastEntry"
-    static var direction = "toastDirection"
+    // Trivial value-typed storage gives these a stable address that the
+    // Swift compiler/optimizer is required to preserve, which is what
+    // objc_setAssociatedObject's pointer-key semantics depend on.
+    static var entry: UInt8     = 0
+    static var direction: UInt8 = 0
 }
 
 // ─── Passthrough window root ──────────────────────────────────────────────────
