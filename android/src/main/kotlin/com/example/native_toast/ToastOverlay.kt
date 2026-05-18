@@ -166,18 +166,19 @@ fun ToastItem(
     val dragOffset = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
 
-    // Golden ratio (φ ≈ 1.618) proportions:
-    //   horizontal(16) / vertical(10) ≈ φ
-    //   icon(20) / gap(12) ≈ φ
-    //   cornerRadius(16) = horizontal padding = base × φ
-    //   elevation(6) = base / φ
+    // Golden ratio (φ ≈ 1.618), base unit = 12dp:
+    //   vertical(12)   = base
+    //   horizontal(20) = base × φ ≈ 19.4
+    //   icon(20)       = horizontal padding (visual unity with edge)
+    //   gap(12)        = vertical padding   (visual unity with edge)
+    //   icon/gap = horizontal/vertical = 20/12 ≈ φ
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer { translationY = dragOffset.value }
             .shadow(elevation = 6.dp, shape = RoundedCornerShape(16.dp))
             .background(bgColor, RoundedCornerShape(16.dp))
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 20.dp, vertical = 12.dp)
             // Hold detection: fires immediately on finger-down, pauses the auto-dismiss timer.
             // Keyed on toast.id so the gesture pipeline is set up once and survives recomposition.
             .pointerInput(toast.id) {
@@ -244,7 +245,6 @@ fun ToastItem(
             text = toast.message,
             color = Color.White,
             fontSize = 14.sp,
-            lineHeight = 22.sp,  // 14 × φ ≈ 22.65
             fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f),
         )

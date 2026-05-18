@@ -4,10 +4,9 @@ import UIKit
 public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDelegate {
 
     private var activeToasts: [ToastEntry] = []
-    // Matches Android: ToastSlideDistance = 72.dp, ToastDismissThreshold = 56.dp, ToastAnimationMs = 450.
-    private let toastAnimationOffset: CGFloat = 72
+    private let toastAnimationOvershoot: CGFloat = 12
     private let toastDismissThreshold: CGFloat = 56
-    private let toastAnimationDuration: TimeInterval = 0.45
+    private let toastAnimationDuration: TimeInterval = 0.35
 
     struct ToastEntry {
         let window: UIWindow
@@ -187,6 +186,11 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         container.layer.shadowRadius = 6
         container.layer.shadowOffset = CGSize(width: 0, height: 2)
 
+        // Plain text — no custom line-height paragraph style. A forced line box
+        // taller than the glyph pushes the glyph below the line box centre, so
+        // .center alignment in the stack ends up visually mismatched with the
+        // icon. Natural font metrics keep the glyph centre on the same axis
+        // as the icon centre.
         let msgLabel = UILabel()
         msgLabel.text = message
         msgLabel.textColor = .white
@@ -195,40 +199,40 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         msgLabel.translatesAutoresizingMaskIntoConstraints = false
         msgLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.minimumLineHeight = 22
-        paragraph.maximumLineHeight = 22
-        msgLabel.attributedText = NSAttributedString(
-            string: message,
-            attributes: [
-                .font: msgLabel.font as Any,
-                .foregroundColor: UIColor.white,
-                .paragraphStyle: paragraph,
-            ]
+        // Golden ratio (φ ≈ 1.618), base unit = 12pt:
+        //   verticalPadding(12) = base   |  horizontalPadding(20) = base × φ
+        //   iconSize(20) = horizontal padding (edge unity)
+        //   iconGap(12)  = vertical padding   (edge unity)
+        //   icon/gap = horizontal/vertical = 20/12 ≈ φ
+        let stackView = UIStackView()
+        stackView.axis = .horizontal
+        stackView.alignment = .center
+        stackView.spacing = 12
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.isLayoutMarginsRelativeArrangement = true
+        stackView.directionalLayoutMargins = NSDirectionalEdgeInsets(
+            top: 12,
+            leading: 20,
+            bottom: 12,
+            trailing: 20
         )
-
-        container.addSubview(msgLabel)
+        container.addSubview(stackView)
 
         var constraints: [NSLayoutConstraint] = [
-            msgLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
-            msgLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
-            msgLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+            stackView.topAnchor.constraint(equalTo: container.topAnchor),
+            stackView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            stackView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ]
 
         if let iconView = makeIconView(icon: icon, color: iconColor) {
-            container.addSubview(iconView)
+            stackView.addArrangedSubview(iconView)
             constraints.append(contentsOf: [
-                iconView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
-                iconView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
                 iconView.widthAnchor.constraint(equalToConstant: 20),
                 iconView.heightAnchor.constraint(equalToConstant: 20),
-                msgLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
             ])
-        } else {
-            constraints.append(
-                msgLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16)
-            )
         }
+        stackView.addArrangedSubview(msgLabel)
 
         NSLayoutConstraint.activate(constraints)
         container.widthAnchor.constraint(equalToConstant: maxWidth).isActive = true
@@ -251,7 +255,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         UIView.animate(
             withDuration: toastAnimationDuration,
             delay: 0,
-            options: [.curveEaseInOut, .allowUserInteraction],
+            options: [.curveEaseOut, .allowUserInteraction],
             animations: {
                 view.transform = .identity
                 view.alpha = 1
@@ -260,13 +264,19 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     }
 
     private func animateOut(view: UIView, position: String, completion: @escaping () -> Void) {
+        // Additive: animate from the current transform (possibly mid-drag)
+        // and add the slide delta on top, so the visible slide distance stays
+        // consistent regardless of how far the user dragged. Without this, a
+        // dragged-then-released toast only travels the tiny remaining gap and
+        // looks like a stutter instead of a smooth continuation off-screen.
         let offset = animationOffset(for: view, position: position)
+        let targetY = view.transform.ty + offset
         UIView.animate(
             withDuration: toastAnimationDuration,
             delay: 0,
             options: [.curveEaseIn, .allowUserInteraction],
             animations: {
-                view.transform = CGAffineTransform(translationX: 0, y: offset)
+                view.transform = CGAffineTransform(translationX: 0, y: targetY)
                 view.alpha = 0
             },
             completion: { _ in completion() }
@@ -275,13 +285,13 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
 
     private func animationOffset(for view: UIView, position: String) -> CGFloat {
         guard let superview = view.superview else {
-            return position == "top" ? -toastAnimationOffset : toastAnimationOffset
+            return position == "top" ? -view.bounds.height : view.bounds.height
         }
 
         if position == "top" {
-            return -max(view.frame.maxY, toastAnimationOffset)
+            return -(view.frame.maxY + toastAnimationOvershoot)
         }
-        return max(superview.bounds.height - view.frame.minY, toastAnimationOffset)
+        return superview.bounds.height - view.frame.minY + toastAnimationOvershoot
     }
 
     // ─── Dismiss ─────────────────────────────────────────────────────────────
@@ -319,18 +329,31 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
 
         var topOffset = topMargin
         for e in activeToasts.filter({ $0.position == "top" }) {
-            var frame = e.containerView.frame
-            frame.origin.y = topOffset
-            e.containerView.frame = frame
-            topOffset += frame.height + 8
+            reposition(e.containerView, toOriginY: topOffset)
+            topOffset += e.containerView.bounds.height + 8
         }
 
         var bottomOffset = bottomMargin
         for e in activeToasts.filter({ $0.position == "bottom" }).reversed() {
-            var frame = e.containerView.frame
-            frame.origin.y = screenBounds.height - bottomOffset - frame.height
-            e.containerView.frame = frame
-            bottomOffset += frame.height + 8
+            let targetY = screenBounds.height - bottomOffset - e.containerView.bounds.height
+            reposition(e.containerView, toOriginY: targetY)
+            bottomOffset += e.containerView.bounds.height + 8
+        }
+    }
+
+    // Animates the view's frame.origin.y so existing toasts smoothly slide into
+    // place when neighbours are added or removed — without this the bottom-stack
+    // would teleport upward whenever a new bottom toast arrives.
+    private func reposition(_ view: UIView, toOriginY targetY: CGFloat) {
+        if abs(view.frame.origin.y - targetY) < 0.5 { return }
+        var newFrame = view.frame
+        newFrame.origin.y = targetY
+        UIView.animate(
+            withDuration: toastAnimationDuration,
+            delay: 0,
+            options: [.curveEaseOut, .allowUserInteraction, .beginFromCurrentState]
+        ) {
+            view.frame = newFrame
         }
     }
 
