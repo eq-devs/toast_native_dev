@@ -21,7 +21,7 @@ Touches outside the toast pass through to the Flutter app, so the page remains u
 
 ```yaml
 dependencies:
-  toast_native_dev: ^0.0.2
+  toast_native_dev: ^0.0.3
 ```
 
 ```dart

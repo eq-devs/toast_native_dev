@@ -1,3 +1,8 @@
+## 0.0.3
+
+* Sync README with the current API, MethodChannel name, and platform implementation.
+* Exclude local build output and machine-specific files from the pub.dev package archive.
+
 ## 0.0.2
 
 * Rewrite README with accurate API documentation and clearer structure (no code changes).
