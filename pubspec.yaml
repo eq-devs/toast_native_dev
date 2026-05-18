@@ -1,7 +1,9 @@
 name: toast_native_dev
-description: Native toast notifications that appear above Flutter widgets and native WebViews using platform overlays.
+description: Native toast notifications that appear above Flutter widgets and native WebViews using platform overlays (Android WindowManager + iOS UIWindow).
 version: 0.0.1
-homepage: https://github.com/yourorg/toast_native_dev
+homepage: https://github.com/eq-devs/toast_native_dev
+repository: https://github.com/eq-devs/toast_native_dev
+issue_tracker: https://github.com/eq-devs/toast_native_dev/issues
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -11,7 +13,7 @@ flutter:
   plugin:
     platforms:
       android:
-        package: com.example.native_toast
+        package: dev.eqdevs.toast_native_dev
         pluginClass: NativeToastPlugin
       ios:
         pluginClass: NativeToastPlugin

@@ -65,7 +65,7 @@ class NativeToastOptions {
 
 // ─── MethodChannel ────────────────────────────────────────────────────────────
 
-const _channel = MethodChannel('com.yourapp/native_toast');
+const _channel = MethodChannel('toast_native_dev/channel');
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 

@@ -1,0 +1,4 @@
+# Internal / development-only files that should never be shipped to pub.dev.
+native_toast_prompt.md
+CLAUDE.md
+.claude/

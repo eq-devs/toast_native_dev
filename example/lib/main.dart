@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:toast_native_dev/native_toast.dart';
+import 'package:toast_native_dev/toast_native_dev.dart';
 
 void main() {
   runApp(const MyApp());

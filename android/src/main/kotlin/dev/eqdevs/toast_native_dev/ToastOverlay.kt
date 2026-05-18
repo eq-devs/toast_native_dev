@@ -1,4 +1,4 @@
-package com.example.native_toast
+package dev.eqdevs.toast_native_dev
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*

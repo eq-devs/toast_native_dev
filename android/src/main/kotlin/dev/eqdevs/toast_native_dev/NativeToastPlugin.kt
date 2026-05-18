@@ -1,4 +1,4 @@
-package com.example.native_toast
+package dev.eqdevs.toast_native_dev
 
 import android.app.Activity
 import android.os.Handler
@@ -70,7 +70,7 @@ class NativeToastPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
     // ─── FlutterPlugin ────────────────────────────────────────────────────────
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
-        channel = MethodChannel(binding.binaryMessenger, "com.yourapp/native_toast")
+        channel = MethodChannel(binding.binaryMessenger, "toast_native_dev/channel")
         channel.setMethodCallHandler(this)
     }
 

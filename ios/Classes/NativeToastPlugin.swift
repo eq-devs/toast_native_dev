@@ -22,7 +22,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
 
     public static func register(with registrar: FlutterPluginRegistrar) {
         let channel = FlutterMethodChannel(
-            name: "com.yourapp/native_toast",
+            name: "toast_native_dev/channel",
             binaryMessenger: registrar.messenger()
         )
         let instance = NativeToastPlugin()

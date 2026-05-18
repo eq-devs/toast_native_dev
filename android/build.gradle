@@ -4,12 +4,12 @@ plugins {
     id 'org.jetbrains.kotlin.plugin.compose' version '2.2.20'
 }
 
-group 'com.example.native_toast'
+group 'dev.eqdevs.toast_native_dev'
 version '1.0-SNAPSHOT'
 
 android {
     compileSdk 35
-    namespace 'com.example.native_toast'
+    namespace 'dev.eqdevs.toast_native_dev'
 
     defaultConfig {
         minSdk 21

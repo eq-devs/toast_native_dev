@@ -3,9 +3,9 @@ Pod::Spec.new do |s|
   s.version          = '0.0.1'
   s.summary          = 'Native toast notifications above Flutter widgets and WebViews.'
   s.description      = 'Shows toast notifications using UIWindow overlays, appearing above Hybrid Composition WebViews.'
-  s.homepage         = 'https://github.com/yourorg/toast_native_dev'
+  s.homepage         = 'https://github.com/eq-devs/toast_native_dev'
   s.license          = { :file => '../LICENSE' }
-  s.author           = { 'Your Org' => 'dev@yourorg.com' }
+  s.author           = { 'eq-devs' => 'estaykargabay1206@gmail.com' }
   s.source           = { :path => '.' }
   s.source_files     = 'Classes/**/*'
   s.dependency 'Flutter'
