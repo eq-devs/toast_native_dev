@@ -1,4 +1,22 @@
 # Internal / development-only files that should never be shipped to pub.dev.
+AGENTS.md
 native_toast_prompt.md
 CLAUDE.md
 .claude/
+
+# Local Flutter/IDE/build output.
+.dart_tool/
+.idea/
+build/
+example/.dart_tool/
+example/build/
+example/android/.gradle/
+example/android/.kotlin/
+example/android/build/
+example/ios/Pods/
+example/ios/Flutter/ephemeral/
+example/ios/Flutter/flutter_export_environment.sh
+
+# Machine-local configuration.
+android/local.properties
+example/android/local.properties
