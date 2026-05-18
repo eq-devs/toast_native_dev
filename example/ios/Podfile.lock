@@ -1,0 +1,22 @@
+PODS:
+  - Flutter (1.0.0)
+  - toast_native_dev (0.0.1):
+    - Flutter
+
+DEPENDENCIES:
+  - Flutter (from `Flutter`)
+  - toast_native_dev (from `.symlinks/plugins/toast_native_dev/ios`)
+
+EXTERNAL SOURCES:
+  Flutter:
+    :path: Flutter
+  toast_native_dev:
+    :path: ".symlinks/plugins/toast_native_dev/ios"
+
+SPEC CHECKSUMS:
+  Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  toast_native_dev: c0189d60e9eda497c3f44ea191ce5168eae6699d
+
+PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+
+COCOAPODS: 1.16.2

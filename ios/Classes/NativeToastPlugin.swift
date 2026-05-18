@@ -4,10 +4,9 @@ import UIKit
 public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDelegate {
 
     private var activeToasts: [ToastEntry] = []
-    private let toastAnimationOffset: CGFloat = 100
+    private let toastAnimationOffset: CGFloat = 220
+    private let toastDismissThreshold: CGFloat = 56
     private let toastAnimationDuration: TimeInterval = 0.45
-    private let toastAnimationDamping: CGFloat = 1.0
-    private let toastAnimationInitialVelocity: CGFloat = 0.5
 
     struct ToastEntry {
         let window: UIWindow
@@ -68,7 +67,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         duration: TimeInterval, color: UIColor?, icon: String, iconColor: UIColor,
         dismissDirection: String
     ) {
-        let screenBounds = UIScreen.main.bounds
+        let screenBounds = currentScreenBounds()
         let maxWidth = screenBounds.width - 32
 
         let containerView = buildToastView(type: type, message: message, color: color,
@@ -76,10 +75,12 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
                                            maxWidth: maxWidth)
         containerView.layoutIfNeeded()
         let fittingSize = containerView.systemLayoutSizeFitting(
-            CGSize(width: maxWidth, height: UIView.layoutFittingCompressedSize.height)
+            CGSize(width: maxWidth, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
         )
-        let toastWidth  = min(fittingSize.width, maxWidth)
-        let toastHeight = max(fittingSize.height, 48)
+        let toastWidth = maxWidth
+        let toastHeight = max(fittingSize.height, 40)
 
         let stackedOffset = stackOffset(for: position, height: toastHeight)
         let marginFromEdge: CGFloat = 64
@@ -90,19 +91,20 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
 
         containerView.frame = CGRect(x: xPos, y: yPos, width: toastWidth, height: toastHeight)
 
-        let toastWindow = UIWindow(frame: screenBounds)
+        let toastWindow = makeToastWindow(frame: screenBounds)
         toastWindow.windowLevel = UIWindow.Level.alert + 1
         toastWindow.backgroundColor = .clear
         toastWindow.isUserInteractionEnabled = true
 
         let rootVC = PassthroughViewController()
+        rootVC.view.frame = screenBounds
         rootVC.view.backgroundColor = .clear
         rootVC.view.isUserInteractionEnabled = true
         toastWindow.rootViewController = rootVC
-        toastWindow.makeKeyAndVisible()
+        toastWindow.isHidden = false
         rootVC.view.addSubview(containerView)
 
-        var entry = ToastEntry(
+        let entry = ToastEntry(
             window: toastWindow,
             containerView: containerView,
             position: position,
@@ -112,6 +114,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
             remainingDuration: max(duration, 0)
         )
         activeToasts.append(entry)
+        rebuildOffsets()
 
         animateIn(view: containerView, position: position)
         attachGestures(to: containerView, entry: entry)
@@ -125,7 +128,6 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
 
     private func scheduleTimer(forWindow window: UIWindow, duration: TimeInterval) {
         guard let idx = activeToasts.firstIndex(where: { $0.window === window }) else { return }
-        let direction = activeToasts[idx].dismissDirection
 
         let workItem = DispatchWorkItem { [weak self, weak window] in
             guard let self = self, let win = window,
@@ -135,7 +137,6 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         activeToasts[idx].dismissWorkItem = workItem
         activeToasts[idx].timerFireDate   = Date().addingTimeInterval(duration)
         activeToasts[idx].remainingDuration = duration
-        _ = direction  // suppress warning
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: workItem)
     }
 
@@ -172,12 +173,12 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         }()
         let container = UIView()
         container.backgroundColor = bgColor
-        container.layer.cornerRadius = 14
+        container.layer.cornerRadius = 16
         container.layer.masksToBounds = false
         container.layer.shadowColor = UIColor.black.cgColor
-        container.layer.shadowOpacity = 0.3
-        container.layer.shadowRadius = 8
-        container.layer.shadowOffset = CGSize(width: 0, height: 4)
+        container.layer.shadowOpacity = 0.22
+        container.layer.shadowRadius = 6
+        container.layer.shadowOffset = CGSize(width: 0, height: 2)
 
         let msgLabel = UILabel()
         msgLabel.text = message
@@ -185,12 +186,25 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         msgLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
         msgLabel.numberOfLines = 0
         msgLabel.translatesAutoresizingMaskIntoConstraints = false
+        msgLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.minimumLineHeight = 22
+        paragraph.maximumLineHeight = 22
+        msgLabel.attributedText = NSAttributedString(
+            string: message,
+            attributes: [
+                .font: msgLabel.font as Any,
+                .foregroundColor: UIColor.white,
+                .paragraphStyle: paragraph,
+            ]
+        )
 
         container.addSubview(msgLabel)
 
         var constraints: [NSLayoutConstraint] = [
-            msgLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 12),
-            msgLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -12),
+            msgLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
+            msgLabel.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
             msgLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
         ]
 
@@ -199,9 +213,9 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
             constraints.append(contentsOf: [
                 iconView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
                 iconView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-                iconView.widthAnchor.constraint(equalToConstant: 24),
-                iconView.heightAnchor.constraint(equalToConstant: 24),
-                msgLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 10),
+                iconView.widthAnchor.constraint(equalToConstant: 20),
+                iconView.heightAnchor.constraint(equalToConstant: 20),
+                msgLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 12),
             ])
         } else {
             constraints.append(
@@ -210,40 +224,28 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         }
 
         NSLayoutConstraint.activate(constraints)
+        container.widthAnchor.constraint(equalToConstant: maxWidth).isActive = true
         return container
     }
 
-    private func makeIconView(icon: String, color: UIColor) -> UIImageView? {
+    private func makeIconView(icon: String, color: UIColor) -> UIView? {
         guard icon != "none" else { return nil }
-
-        let symbolName: String = {
-            switch icon {
-            case "success": return "checkmark.circle"
-            case "error":   return "xmark.circle"
-            default:        return "info.circle"
-            }
-        }()
-
-        let config = UIImage.SymbolConfiguration(pointSize: 24, weight: .regular)
-        let imageView = UIImageView(image: UIImage(systemName: symbolName, withConfiguration: config))
-        imageView.tintColor = color
-        imageView.contentMode = .scaleAspectFit
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        return imageView
+        let iconView = ToastIconView(type: icon, color: color)
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        return iconView
     }
 
     // ─── Enter / exit animations ─────────────────────────────────────────────
 
     private func animateIn(view: UIView, position: String) {
-        let offset = position == "top" ? -toastAnimationOffset : toastAnimationOffset
+        let distance = max(view.bounds.height, toastAnimationOffset)
+        let offset = position == "top" ? -distance : distance
         view.transform = CGAffineTransform(translationX: 0, y: offset)
         view.alpha = 0
         UIView.animate(
             withDuration: toastAnimationDuration,
             delay: 0,
-            usingSpringWithDamping: toastAnimationDamping,
-            initialSpringVelocity: toastAnimationInitialVelocity,
-            options: [.curveEaseInOut],
+            options: [.curveEaseInOut, .allowUserInteraction],
             animations: {
                 view.transform = .identity
                 view.alpha = 1
@@ -251,14 +253,13 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         )
     }
 
-    private func animateOut(view: UIView, dismissDirection: String, completion: @escaping () -> Void) {
-        let offset = dismissDirection == "up" ? -toastAnimationOffset : toastAnimationOffset
+    private func animateOut(view: UIView, position: String, completion: @escaping () -> Void) {
+        let distance = max(view.bounds.height, toastAnimationOffset)
+        let offset = position == "top" ? -distance : distance
         UIView.animate(
             withDuration: toastAnimationDuration,
             delay: 0,
-            usingSpringWithDamping: toastAnimationDamping,
-            initialSpringVelocity: toastAnimationInitialVelocity,
-            options: [.curveEaseInOut],
+            options: [.curveEaseIn, .allowUserInteraction],
             animations: {
                 view.transform = CGAffineTransform(translationX: 0, y: offset)
                 view.alpha = 0
@@ -272,7 +273,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     private func dismissToast(entry: ToastEntry) {
         guard activeToasts.contains(where: { $0.window === entry.window }) else { return }
         entry.dismissWorkItem?.cancel()
-        animateOut(view: entry.containerView, dismissDirection: entry.dismissDirection) { [weak self] in
+        animateOut(view: entry.containerView, position: entry.position) { [weak self] in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 entry.window.isHidden = true
@@ -285,12 +286,15 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     // ─── Stacking ─────────────────────────────────────────────────────────────
 
     private func stackOffset(for position: String, height: CGFloat) -> CGFloat {
-        activeToasts.filter { $0.position == position }
+        if position == "bottom" {
+            return 0
+        }
+        return activeToasts.filter { $0.position == position }
             .reduce(0) { $0 + $1.containerView.frame.height + 8 }
     }
 
     private func rebuildOffsets() {
-        let screenBounds = UIScreen.main.bounds
+        let screenBounds = currentScreenBounds()
         let margin: CGFloat = 64
 
         var topOffset = margin
@@ -302,7 +306,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         }
 
         var bottomOffset = margin
-        for e in activeToasts.filter({ $0.position == "bottom" }) {
+        for e in activeToasts.filter({ $0.position == "bottom" }).reversed() {
             var frame = e.containerView.frame
             frame.origin.y = screenBounds.height - bottomOffset - frame.height
             e.containerView.frame = frame
@@ -323,7 +327,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         view.addGestureRecognizer(hold)
         objc_setAssociatedObject(hold, &AssociatedKeys.entry, toastWindow, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
-        // Pan: visual drag + velocity-based dismiss or spring bounce-back.
+        // Pan: visual drag + threshold dismiss or spring bounce-back.
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.delegate = self
         view.addGestureRecognizer(pan)
@@ -369,11 +373,10 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
             entry.containerView.transform = CGAffineTransform(translationX: 0, y: clamped)
 
         case .ended:
-            let velocity    = recognizer.velocity(in: superview).y
             let translation = recognizer.translation(in: superview).y
             let shouldDismiss: Bool = direction == "up"
-                ? velocity < -500 || translation < -120
-                : velocity >  500 || translation >  120
+                ? translation < -toastDismissThreshold
+                : translation >  toastDismissThreshold
 
             if shouldDismiss {
                 dismissToast(entry: entry)
@@ -422,6 +425,96 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
             alpha: CGFloat((argb >> 24) & 0xff) / 255
         )
     }
+
+    private func currentScreenBounds() -> CGRect {
+        if #available(iOS 13.0, *), let scene = activeWindowScene() {
+            return scene.coordinateSpace.bounds
+        }
+        return UIScreen.main.bounds
+    }
+
+    private func makeToastWindow(frame: CGRect) -> UIWindow {
+        if #available(iOS 13.0, *), let scene = activeWindowScene() {
+            let window = PassthroughWindow(windowScene: scene)
+            window.frame = frame
+            return window
+        }
+        return PassthroughWindow(frame: frame)
+    }
+
+    @available(iOS 13.0, *)
+    private func activeWindowScene() -> UIWindowScene? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        return scenes.first { $0.activationState == .foregroundActive }
+            ?? scenes.first { $0.activationState == .foregroundInactive }
+            ?? UIApplication.shared.windows.first(where: { !$0.isHidden })?.windowScene
+    }
+}
+
+// ─── Toast icon ───────────────────────────────────────────────────────────────
+
+private class ToastIconView: UIView {
+    private let type: String
+    private let color: UIColor
+
+    init(type: String, color: UIColor) {
+        self.type = type
+        self.color = color
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        isOpaque = false
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let context = UIGraphicsGetCurrentContext() else { return }
+
+        let strokeWidth: CGFloat = 2.4
+        let inset = strokeWidth / 2
+        let circleRect = rect.insetBy(dx: inset, dy: inset)
+
+        context.setStrokeColor(color.cgColor)
+        context.setFillColor(color.cgColor)
+        context.setLineWidth(strokeWidth)
+        context.setLineCap(.round)
+        context.strokeEllipse(in: circleRect)
+
+        switch type {
+        case "success":
+            drawLine(from: CGPoint(x: rect.width * 0.28, y: rect.height * 0.52),
+                     to: CGPoint(x: rect.width * 0.43, y: rect.height * 0.68))
+            drawLine(from: CGPoint(x: rect.width * 0.43, y: rect.height * 0.68),
+                     to: CGPoint(x: rect.width * 0.73, y: rect.height * 0.35))
+
+        case "error":
+            drawLine(from: CGPoint(x: rect.width * 0.35, y: rect.height * 0.35),
+                     to: CGPoint(x: rect.width * 0.65, y: rect.height * 0.65))
+            drawLine(from: CGPoint(x: rect.width * 0.65, y: rect.height * 0.35),
+                     to: CGPoint(x: rect.width * 0.35, y: rect.height * 0.65))
+
+        default:
+            drawLine(from: CGPoint(x: rect.midX, y: rect.height * 0.42),
+                     to: CGPoint(x: rect.midX, y: rect.height * 0.70))
+            context.fillEllipse(
+                in: CGRect(
+                    x: rect.midX - strokeWidth / 2,
+                    y: rect.height * 0.30 - strokeWidth / 2,
+                    width: strokeWidth,
+                    height: strokeWidth
+                )
+            )
+        }
+    }
+
+    private func drawLine(from start: CGPoint, to end: CGPoint) {
+        guard let context = UIGraphicsGetCurrentContext() else { return }
+        context.move(to: start)
+        context.addLine(to: end)
+        context.strokePath()
+    }
 }
 
 // ─── Associated object keys ───────────────────────────────────────────────────
@@ -432,6 +525,16 @@ private enum AssociatedKeys {
 }
 
 // ─── Passthrough window root ──────────────────────────────────────────────────
+
+private class PassthroughWindow: UIWindow {
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let hit = super.hitTest(point, with: event)
+        if hit === self || hit === rootViewController?.view {
+            return nil
+        }
+        return hit
+    }
+}
 
 private class PassthroughViewController: UIViewController {
     override func loadView() { view = PassthroughView() }
