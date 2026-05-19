@@ -1,3 +1,9 @@
+## 0.0.5
+
+* Fix Android Compose `Offset` import so the example app builds successfully.
+* Add Dart MethodChannel contract tests for toast options, durations, colors, icons, and dismiss directions.
+* Expand the example app into a manual test lab for stress, full-size, stacking, timer, color, and gesture risk cases.
+
 ## 0.0.4
 
 * Correct README and package description wording around Flutter overlays and native platform views.
