@@ -20,3 +20,6 @@ example/ios/Flutter/flutter_export_environment.sh
 # Machine-local configuration.
 android/local.properties
 example/android/local.properties
+
+# Local screenshots captured while debugging.
+Screenshot*.png

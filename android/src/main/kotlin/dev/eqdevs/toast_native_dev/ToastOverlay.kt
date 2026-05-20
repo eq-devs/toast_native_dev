@@ -21,7 +21,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -259,8 +262,18 @@ fun ToastItem(
             color = Color.White,
             fontSize = 14.sp,
             fontWeight = FontWeight.Medium,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.weight(1f),
+            lineHeight = 20.sp,
+            textAlign = TextAlign.Start,
+            style = TextStyle(
+                platformStyle = PlatformTextStyle(includeFontPadding = false),
+                lineHeightStyle = LineHeightStyle(
+                    alignment = LineHeightStyle.Alignment.Center,
+                    trim = LineHeightStyle.Trim.Both,
+                ),
+            ),
+            modifier = Modifier
+                .weight(1f)
+                .align(Alignment.CenterVertically),
         )
     }
 }

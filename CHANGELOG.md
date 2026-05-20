@@ -1,3 +1,8 @@
+## 0.0.7
+
+* Start-align Android toast message text after the icon.
+* Tighten Android toast text line metrics so messages remain vertically centered.
+
 ## 0.0.6
 
 * Center Android native toast message text within the toast content area.
