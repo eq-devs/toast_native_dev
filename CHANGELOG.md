@@ -1,3 +1,7 @@
+## 0.0.6
+
+* Center Android native toast message text within the toast content area.
+
 ## 0.0.5
 
 * Fix Android Compose `Offset` import so the example app builds successfully.
