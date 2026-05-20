@@ -22,6 +22,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -258,6 +259,7 @@ fun ToastItem(
             color = Color.White,
             fontSize = 14.sp,
             fontWeight = FontWeight.Medium,
+            textAlign = TextAlign.Center,
             modifier = Modifier.weight(1f),
         )
     }
