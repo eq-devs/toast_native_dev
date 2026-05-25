@@ -101,7 +101,7 @@ class NativeToastPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         activity = null
     }
 
-    // ─── Overlay lifecycle ────────────────────────────────────────────────────
+    // ─── Overlay lifecycle ──────────────────────────────────────────────────── 
 
     private fun setupOverlay() {
         val act = activity ?: return

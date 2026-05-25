@@ -148,7 +148,7 @@ class _ToastTestLabState extends State<ToastTestLab> {
                 onPressed: () => showToast(
                   type: ToastType.success,
                   message:
-                      'Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!Profile saved!',
+                      'Profile saved!Profile                                                                 ',
                   options: const NativeToastOptions(
                     length: NativeToastLength.medium,
                   ),

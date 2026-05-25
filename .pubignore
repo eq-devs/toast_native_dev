@@ -23,3 +23,10 @@ example/android/local.properties
 
 # Local screenshots captured while debugging.
 Screenshot*.png
+
+# Publisher website and Firebase Hosting configuration.
+publisher_site/
+firebase.json
+.firebaserc
+.firebase/
+firepit-log.txt
