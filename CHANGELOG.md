@@ -1,3 +1,9 @@
+## 0.0.8
+
+* Update native toast spacing to use 14dp/pt content padding and icon gap.
+* Position top and bottom Android toasts relative to system bars before applying edge padding.
+* Match iOS top and bottom edge spacing to the updated 14pt toast layout.
+
 ## 0.0.7
 
 * Start-align Android toast message text after the icon.

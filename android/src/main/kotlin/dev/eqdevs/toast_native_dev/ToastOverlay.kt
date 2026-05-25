@@ -73,7 +73,8 @@ fun ToastOverlay(
         Column(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = 64.dp, start = 16.dp, end = 16.dp),
+                .statusBarsPadding()
+                .padding(top = 14.dp, start = 14.dp, end = 14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             toasts.filter { it.position == "top" }.forEach { toast ->
@@ -96,7 +97,8 @@ fun ToastOverlay(
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(bottom = 64.dp, start = 16.dp, end = 16.dp),
+                .navigationBarsPadding()
+                .padding(bottom = 14.dp, start = 14.dp, end = 14.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             // Reversed so newest toast is closest to the bottom edge
@@ -178,19 +180,14 @@ fun ToastItem(
     val springBack = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
 
-    // Golden ratio (φ ≈ 1.618), base unit = 12dp:
-    //   vertical(12)   = base
-    //   horizontal(20) = base × φ ≈ 19.4
-    //   icon(20)       = horizontal padding (visual unity with edge)
-    //   gap(12)        = vertical padding   (visual unity with edge)
-    //   icon/gap = horizontal/vertical = 20/12 ≈ φ
+    // Toast content metrics are kept in sync with the iOS renderer.
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer { translationY = dragOffset }
             .shadow(elevation = 6.dp, shape = RoundedCornerShape(16.dp))
             .background(bgColor, RoundedCornerShape(16.dp))
-            .padding(horizontal = 20.dp, vertical = 12.dp)
+            .padding(14.dp)
             // Hold detection: fires immediately on finger-down, pauses the auto-dismiss timer.
             // Keyed on toast.id so the gesture pipeline is set up once and survives recomposition.
             .pointerInput(toast.id) {
@@ -255,7 +252,7 @@ fun ToastItem(
     ) {
         if (toast.icon != "none") {
             ToastIcon(type = toast.icon, color = iconColor)
-            Spacer(modifier = Modifier.width(12.dp))  // 20 / φ ≈ 12.36
+            Spacer(modifier = Modifier.width(14.dp))
         }
         Text(
             text = toast.message,

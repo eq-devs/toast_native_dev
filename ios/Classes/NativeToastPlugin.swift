@@ -70,7 +70,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         guard let scene = activeWindowScene() else { return }
 
         let screenBounds = scene.coordinateSpace.bounds
-        let maxWidth = screenBounds.width - 32
+        let maxWidth = screenBounds.width - 28
 
         let containerView = buildToastView(type: type, message: message, color: color,
                                            icon: icon, iconColor: iconColor,
@@ -86,9 +86,9 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
 
         let stackedOffset = stackOffset(for: position)
         let safeInsets = scene.windows.first(where: { $0.isKeyWindow })?.safeAreaInsets ?? .zero
-        let edgeMargin: CGFloat = 64
-        let topMargin = max(edgeMargin, safeInsets.top + 16)
-        let bottomMargin = max(edgeMargin, safeInsets.bottom + 16)
+        let edgeMargin: CGFloat = 14
+        let topMargin = max(edgeMargin, safeInsets.top + 14)
+        let bottomMargin = max(edgeMargin, safeInsets.bottom + 14)
         let xPos = (screenBounds.width - toastWidth) / 2
         let yPos: CGFloat = position == "top"
             ? topMargin + stackedOffset
@@ -199,22 +199,18 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         msgLabel.translatesAutoresizingMaskIntoConstraints = false
         msgLabel.setContentCompressionResistancePriority(.required, for: .vertical)
 
-        // Golden ratio (φ ≈ 1.618), base unit = 12pt:
-        //   verticalPadding(12) = base   |  horizontalPadding(20) = base × φ
-        //   iconSize(20) = horizontal padding (edge unity)
-        //   iconGap(12)  = vertical padding   (edge unity)
-        //   icon/gap = horizontal/vertical = 20/12 ≈ φ
+        // Toast content metrics are kept in sync with the Android renderer.
         let stackView = UIStackView()
         stackView.axis = .horizontal
         stackView.alignment = .center
-        stackView.spacing = 12
+        stackView.spacing = 14
         stackView.translatesAutoresizingMaskIntoConstraints = false
         stackView.isLayoutMarginsRelativeArrangement = true
         stackView.directionalLayoutMargins = NSDirectionalEdgeInsets(
-            top: 12,
-            leading: 20,
-            bottom: 12,
-            trailing: 20
+            top: 14,
+            leading: 14,
+            bottom: 14,
+            trailing: 14
         )
         container.addSubview(stackView)
 
@@ -326,9 +322,9 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         guard let scene = activeWindowScene() else { return }
         let screenBounds = scene.coordinateSpace.bounds
         let safeInsets = scene.windows.first(where: { $0.isKeyWindow })?.safeAreaInsets ?? .zero
-        let edgeMargin: CGFloat = 64
-        let topMargin = max(edgeMargin, safeInsets.top + 16)
-        let bottomMargin = max(edgeMargin, safeInsets.bottom + 16)
+        let edgeMargin: CGFloat = 14
+        let topMargin = max(edgeMargin, safeInsets.top + 14)
+        let bottomMargin = max(edgeMargin, safeInsets.bottom + 14)
 
         // Partition once instead of filtering twice.
         var topToasts: [ToastEntry] = []
