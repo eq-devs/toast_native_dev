@@ -4,17 +4,20 @@ import UIKit
 public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDelegate {
 
     private var activeToasts: [ToastEntry] = []
+    // Single shared window hosting every toast — UIWindow is the most expensive
+    // UIKit object to create, so we make one lazily and keep it for the app's
+    // lifetime instead of one per toast.
+    private var overlayWindow: PassthroughWindow?
     private let toastAnimationOvershoot: CGFloat = 12
     private let toastDismissThreshold: CGFloat = 56
     private let toastAnimationDuration: TimeInterval = 0.35
 
     struct ToastEntry {
-        let window: UIWindow
         let containerView: UIView
         let position: String
         let dismissDirection: String
         var dismissWorkItem: DispatchWorkItem?
-        var timerFireDate: Date?       // nil when paused or length == "never"
+        var timerFireUptime: TimeInterval?   // nil when paused or length == "never"
         var remainingDuration: TimeInterval  // updated on pause
     }
 
@@ -44,19 +47,17 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         let type            = args["type"]            as? String ?? "success"
         let message         = args["message"]         as? String ?? ""
         let position        = args["position"]        as? String ?? "top"
-        let length          = args["length"]          as? String ?? "short"
-        let duration        = durationFor(durationMs: args["durationMs"], length: length)
+        let duration        = durationFor(durationMs: args["durationMs"])
         let color           = colorFor(value: args["color"])
         let icon            = args["icon"]            as? String ?? type
         let iconColor       = colorFor(value: args["iconColor"]) ?? .white
         let dismissDirection = args["dismissDirection"] as? String
             ?? (position == "top" ? "up" : "down")
 
-        DispatchQueue.main.async {
-            self.showToast(type: type, message: message, position: position,
-                           duration: duration, color: color, icon: icon, iconColor: iconColor,
-                           dismissDirection: dismissDirection)
-        }
+        // MethodChannel callbacks already arrive on the main thread.
+        showToast(type: type, message: message, position: position,
+                  duration: duration, color: color, icon: icon, iconColor: iconColor,
+                  dismissDirection: dismissDirection)
         result(nil)
     }
 
@@ -67,7 +68,9 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         duration: TimeInterval, color: UIColor?, icon: String, iconColor: UIColor,
         dismissDirection: String
     ) {
-        guard let scene = activeWindowScene() else { return }
+        guard let toastWindow = presentationWindow(),
+              let scene = toastWindow.windowScene,
+              let rootView = toastWindow.rootViewController?.view else { return }
 
         let screenBounds = scene.coordinateSpace.bounds
         let maxWidth = screenBounds.width - 28
@@ -75,7 +78,6 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         let containerView = buildToastView(type: type, message: message, color: color,
                                            icon: icon, iconColor: iconColor,
                                            maxWidth: maxWidth)
-        containerView.layoutIfNeeded()
         let fittingSize = containerView.systemLayoutSizeFitting(
             CGSize(width: maxWidth, height: UIView.layoutFittingCompressedSize.height),
             withHorizontalFittingPriority: .required,
@@ -95,74 +97,91 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
             : screenBounds.height - bottomMargin - toastHeight - stackedOffset
 
         containerView.frame = CGRect(x: xPos, y: yPos, width: toastWidth, height: toastHeight)
-
-        let toastWindow = PassthroughWindow(windowScene: scene)
-        toastWindow.frame = screenBounds
-        toastWindow.windowLevel = UIWindow.Level.alert + 1
-        toastWindow.backgroundColor = .clear
-        toastWindow.isUserInteractionEnabled = true
-
-        let rootVC = PassthroughViewController()
-        rootVC.view.frame = screenBounds
-        rootVC.view.backgroundColor = .clear
-        rootVC.view.isUserInteractionEnabled = true
-        toastWindow.rootViewController = rootVC
-        toastWindow.isHidden = false
-        rootVC.view.addSubview(containerView)
+        rootView.addSubview(containerView)
 
         let entry = ToastEntry(
-            window: toastWindow,
             containerView: containerView,
             position: position,
             dismissDirection: dismissDirection,
             dismissWorkItem: nil,
-            timerFireDate: nil,
+            timerFireUptime: nil,
             remainingDuration: max(duration, 0)
         )
         activeToasts.append(entry)
         rebuildOffsets()
 
         animateIn(view: containerView, position: position)
-        attachGestures(to: containerView, entry: entry)
+        attachGestures(to: containerView)
 
         if duration > 0 {
-            scheduleTimer(forWindow: toastWindow, duration: duration)
+            scheduleTimer(forView: containerView, duration: duration)
         }
+    }
+
+    // Returns the shared overlay window, creating it on first use or after its
+    // scene has been disconnected (e.g. iPad window closed).
+    private func presentationWindow() -> UIWindow? {
+        if let window = overlayWindow, window.windowScene != nil {
+            window.isHidden = false
+            return window
+        }
+
+        // Scene gone — any surviving entries reference views in a dead window.
+        for entry in activeToasts { entry.dismissWorkItem?.cancel() }
+        activeToasts.removeAll()
+
+        guard let scene = activeWindowScene() else { return nil }
+        let window = PassthroughWindow(windowScene: scene)
+        window.frame = scene.coordinateSpace.bounds
+        window.windowLevel = UIWindow.Level.alert + 1
+        window.backgroundColor = .clear
+        window.isUserInteractionEnabled = true
+
+        let rootVC = PassthroughViewController()
+        rootVC.view.frame = window.frame
+        rootVC.view.backgroundColor = .clear
+        rootVC.view.isUserInteractionEnabled = true
+        window.rootViewController = rootVC
+        window.isHidden = false
+        overlayWindow = window
+        return window
     }
 
     // ─── Timer scheduling / pause / resume ───────────────────────────────────
 
-    private func scheduleTimer(forWindow window: UIWindow, duration: TimeInterval) {
-        guard let idx = activeToasts.firstIndex(where: { $0.window === window }) else { return }
+    private func scheduleTimer(forView view: UIView, duration: TimeInterval) {
+        guard let idx = activeToasts.firstIndex(where: { $0.containerView === view }) else { return }
 
-        let workItem = DispatchWorkItem { [weak self, weak window] in
-            guard let self = self, let win = window,
-                  let current = self.activeToasts.first(where: { $0.window === win }) else { return }
+        let workItem = DispatchWorkItem { [weak self, weak view] in
+            guard let self = self, let view = view,
+                  let current = self.activeToasts.first(where: { $0.containerView === view }) else { return }
             self.dismissToast(entry: current)
         }
         activeToasts[idx].dismissWorkItem = workItem
-        activeToasts[idx].timerFireDate   = Date().addingTimeInterval(duration)
+        // Monotonic clock — wall time (Date) can jump under NTP sync or manual
+        // clock changes and corrupt the remaining duration on pause.
+        activeToasts[idx].timerFireUptime = ProcessInfo.processInfo.systemUptime + duration
         activeToasts[idx].remainingDuration = duration
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: workItem)
     }
 
-    private func pauseTimer(forWindow window: UIWindow) {
-        guard let idx = activeToasts.firstIndex(where: { $0.window === window }) else { return }
-        guard let fireDate = activeToasts[idx].timerFireDate else { return } // already paused or "never"
+    private func pauseTimer(forView view: UIView) {
+        guard let idx = activeToasts.firstIndex(where: { $0.containerView === view }) else { return }
+        guard let fireUptime = activeToasts[idx].timerFireUptime else { return } // already paused or "never"
 
         activeToasts[idx].dismissWorkItem?.cancel()
         activeToasts[idx].dismissWorkItem = nil
-        let remaining = max(fireDate.timeIntervalSince(Date()), 0.2)
+        let remaining = max(fireUptime - ProcessInfo.processInfo.systemUptime, 0.2)
         activeToasts[idx].remainingDuration = remaining
-        activeToasts[idx].timerFireDate = nil
+        activeToasts[idx].timerFireUptime = nil
     }
 
-    private func resumeTimer(forWindow window: UIWindow) {
-        guard let idx = activeToasts.firstIndex(where: { $0.window === window }) else { return }
-        guard activeToasts[idx].timerFireDate == nil else { return } // already running
+    private func resumeTimer(forView view: UIView) {
+        guard let idx = activeToasts.firstIndex(where: { $0.containerView === view }) else { return }
+        guard activeToasts[idx].timerFireUptime == nil else { return } // already running
         let remaining = activeToasts[idx].remainingDuration
         guard remaining > 0 else { return } // "never" toast — don't reschedule
-        scheduleTimer(forWindow: window, duration: remaining)
+        scheduleTimer(forView: view, duration: remaining)
     }
 
     // ─── View builder ─────────────────────────────────────────────────────────
@@ -293,7 +312,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     // ─── Dismiss ─────────────────────────────────────────────────────────────
 
     private func dismissToast(entry: ToastEntry) {
-        guard activeToasts.contains(where: { $0.window === entry.window }) else { return }
+        guard activeToasts.contains(where: { $0.containerView === entry.containerView }) else { return }
         entry.dismissWorkItem?.cancel()
         // Lock out further touches so an active pan/hold can't keep writing
         // .transform mid-animation and fight the slide-off.
@@ -301,9 +320,12 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         animateOut(view: entry.containerView, position: entry.position) { [weak self] in
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                entry.window.isHidden = true
-                self.activeToasts.removeAll { $0.window === entry.window }
+                entry.containerView.removeFromSuperview()
+                self.activeToasts.removeAll { $0.containerView === entry.containerView }
                 self.rebuildOffsets()
+                if self.activeToasts.isEmpty {
+                    self.overlayWindow?.isHidden = true
+                }
             }
         }
     }
@@ -319,7 +341,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     }
 
     private func rebuildOffsets() {
-        guard let scene = activeWindowScene() else { return }
+        guard let scene = overlayWindow?.windowScene else { return }
         let screenBounds = scene.coordinateSpace.bounds
         let safeInsets = scene.windows.first(where: { $0.isKeyWindow })?.safeAreaInsets ?? .zero
         let edgeMargin: CGFloat = 14
@@ -371,24 +393,20 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
 
     // ─── Gesture attachment ───────────────────────────────────────────────────
 
-    private func attachGestures(to view: UIView, entry: ToastEntry) {
-        let toastWindow = entry.window
-
+    // Recognizers are attached to the toast's containerView, so handlers
+    // recover the entry via recognizer.view — no associated objects needed.
+    private func attachGestures(to view: UIView) {
         // Hold: pause timer on touch-down, resume on lift.
         let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold(_:)))
         hold.minimumPressDuration = 0
         hold.cancelsTouchesInView = false
         hold.delegate = self
         view.addGestureRecognizer(hold)
-        objc_setAssociatedObject(hold, &AssociatedKeys.entry, toastWindow, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
 
         // Pan: visual drag + threshold dismiss or spring bounce-back.
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.delegate = self
         view.addGestureRecognizer(pan)
-        objc_setAssociatedObject(pan, &AssociatedKeys.entry,     toastWindow,                      .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-        objc_setAssociatedObject(pan, &AssociatedKeys.direction, entry.dismissDirection as NSString, .OBJC_ASSOCIATION_RETAIN_NONATOMIC)
-
     }
 
     // Allow hold and pan to run simultaneously so hold can pause the timer
@@ -401,23 +419,22 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     // ─── Gesture handlers ─────────────────────────────────────────────────────
 
     @objc private func handleHold(_ recognizer: UILongPressGestureRecognizer) {
-        guard let win = objc_getAssociatedObject(recognizer, &AssociatedKeys.entry) as? UIWindow
-        else { return }
+        guard let view = recognizer.view else { return }
         switch recognizer.state {
         case .began:
-            pauseTimer(forWindow: win)
+            pauseTimer(forView: view)
         case .ended, .cancelled, .failed:
-            resumeTimer(forWindow: win)
+            resumeTimer(forView: view)
         default:
             break
         }
     }
 
     @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
-        guard let win = objc_getAssociatedObject(recognizer, &AssociatedKeys.entry) as? UIWindow,
-              let entry = activeToasts.first(where: { $0.window === win })
+        guard let view = recognizer.view,
+              let entry = activeToasts.first(where: { $0.containerView === view })
         else { return }
-        let direction = objc_getAssociatedObject(recognizer, &AssociatedKeys.direction) as? String ?? "up"
+        let direction = entry.dismissDirection
         let superview = entry.containerView.superview
 
         switch recognizer.state {
@@ -455,19 +472,9 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
 
     // ─── Utilities ────────────────────────────────────────────────────────────
 
-    private func durationFor(durationMs: Any?, length: String) -> TimeInterval {
-        if let milliseconds = durationMs as? NSNumber {
-            return milliseconds.doubleValue / 1000
-        }
-
-        switch length {
-        case "short":  return 2
-        case "medium": return 4
-        case "long":   return 6
-        case "ages":   return 10
-        case "never":  return -1
-        default:       return 2
-        }
+    private func durationFor(durationMs: Any?) -> TimeInterval {
+        guard let milliseconds = durationMs as? NSNumber else { return 2 }
+        return milliseconds.doubleValue / 1000
     }
 
     private func colorFor(value: Any?) -> UIColor? {
@@ -552,16 +559,6 @@ private class ToastIconView: UIView {
         context.addLine(to: end)
         context.strokePath()
     }
-}
-
-// ─── Associated object keys ───────────────────────────────────────────────────
-
-private enum AssociatedKeys {
-    // Trivial value-typed storage gives these a stable address that the
-    // Swift compiler/optimizer is required to preserve, which is what
-    // objc_setAssociatedObject's pointer-key semantics depend on.
-    static var entry: UInt8     = 0
-    static var direction: UInt8 = 0
 }
 
 // ─── Passthrough window root ──────────────────────────────────────────────────

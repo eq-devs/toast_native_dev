@@ -9,7 +9,7 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Text
+import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -55,6 +55,7 @@ data class ToastData(
 fun ToastOverlay(
     toasts: List<ToastData>,
     onDismiss: (id: String) -> Unit,
+    onRemoved: (id: String) -> Unit,
     onHold: (id: String) -> Unit,
     onRelease: (id: String) -> Unit,
 ) {
@@ -87,6 +88,7 @@ fun ToastOverlay(
                         exitFadeSpec = exitFadeSpec,
                         exitSlideSpec = exitSlideSpec,
                         onDismiss = onDismiss,
+                        onRemoved = onRemoved,
                         onHold = onHold,
                         onRelease = onRelease,
                     )
@@ -112,6 +114,7 @@ fun ToastOverlay(
                         exitFadeSpec = exitFadeSpec,
                         exitSlideSpec = exitSlideSpec,
                         onDismiss = onDismiss,
+                        onRemoved = onRemoved,
                         onHold = onHold,
                         onRelease = onRelease,
                     )
@@ -130,6 +133,7 @@ private fun ToastSlot(
     exitFadeSpec: FiniteAnimationSpec<Float>,
     exitSlideSpec: FiniteAnimationSpec<IntOffset>,
     onDismiss: (id: String) -> Unit,
+    onRemoved: (id: String) -> Unit,
     onHold: (id: String) -> Unit,
     onRelease: (id: String) -> Unit,
 ) {
@@ -138,6 +142,14 @@ private fun ToastSlot(
     // (visible = false) drives the exit transition without an empty-frame stutter.
     val visibilityState = remember { MutableTransitionState(initialState = false) }
     visibilityState.targetState = toast.visible
+
+    // Remove the toast from the backing list exactly when the exit animation
+    // finishes (idle while settled hidden) — no fixed-delay guess.
+    LaunchedEffect(visibilityState.isIdle, visibilityState.currentState) {
+        if (visibilityState.isIdle && !visibilityState.currentState) {
+            onRemoved(toast.id)
+        }
+    }
 
     AnimatedVisibility(
         visibleState = visibilityState,
@@ -254,14 +266,14 @@ fun ToastItem(
             ToastIcon(type = toast.icon, color = iconColor)
             Spacer(modifier = Modifier.width(14.dp))
         }
-        Text(
+        BasicText(
             text = toast.message,
-            color = Color.White,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
-            lineHeight = 20.sp,
-            textAlign = TextAlign.Start,
             style = TextStyle(
+                color = Color.White,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                lineHeight = 20.sp,
+                textAlign = TextAlign.Start,
                 platformStyle = PlatformTextStyle(includeFontPadding = false),
                 lineHeightStyle = LineHeightStyle(
                     alignment = LineHeightStyle.Alignment.Center,

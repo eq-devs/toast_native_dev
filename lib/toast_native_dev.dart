@@ -31,17 +31,16 @@ class NativeToastIcon {
 }
 
 class NativeToastLength {
-  const NativeToastLength._(this.name, this.durationMs);
+  const NativeToastLength._(this.durationMs);
 
-  const NativeToastLength.ms(int durationMs) : this._('custom', durationMs);
+  const NativeToastLength.ms(int durationMs) : this._(durationMs);
 
-  static const short = NativeToastLength._('short', 2000);
-  static const medium = NativeToastLength._('medium', 4000);
-  static const long = NativeToastLength._('long', 6000);
-  static const ages = NativeToastLength._('ages', 10000);
-  static const never = NativeToastLength._('never', -1);
+  static const short = NativeToastLength._(2000);
+  static const medium = NativeToastLength._(4000);
+  static const long = NativeToastLength._(6000);
+  static const ages = NativeToastLength._(10000);
+  static const never = NativeToastLength._(-1);
 
-  final String name;
   final int durationMs;
 }
 
@@ -108,36 +107,18 @@ Future<void> showToast({
   final resolvedIcon = options.icon ?? _defaultIconFor(type);
 
   await _channel.invokeMethod('showToast', {
-    'type': _typeToString(type),
+    'type': type.name,
     'message': message,
-    'position': _positionToString(resolvedPosition),
-    'length': resolvedLength.name,
+    'position': resolvedPosition.name,
     'durationMs': resolvedLength.durationMs,
     'color': resolvedColor.toARGB32(),
     'icon': resolvedIcon.name,
     'iconColor': resolvedIcon.color.toARGB32(),
-    'dismissDirection': _dismissDirectionToString(resolvedDismiss),
+    'dismissDirection': resolvedDismiss.name,
   });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-String _typeToString(ToastType t) => switch (t) {
-      ToastType.success => 'success',
-      ToastType.error => 'error',
-      ToastType.warning => 'warning',
-    };
-
-String _positionToString(ToastPosition p) => switch (p) {
-      ToastPosition.top => 'top',
-      ToastPosition.bottom => 'bottom',
-    };
-
-String _dismissDirectionToString(NativeToastDismissDirection direction) =>
-    switch (direction) {
-      NativeToastDismissDirection.up => 'up',
-      NativeToastDismissDirection.down => 'down',
-    };
 
 NativeToastIcon _defaultIconFor(ToastType type) => switch (type) {
       ToastType.success => const NativeToastIcon.success(),

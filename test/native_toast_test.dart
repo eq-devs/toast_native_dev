@@ -31,7 +31,6 @@ void main() {
       'type': 'success',
       'message': 'Saved',
       'position': 'top',
-      'length': 'short',
       'durationMs': 2000,
       'color': 0xff1b8918,
       'icon': 'success',
@@ -68,7 +67,6 @@ void main() {
       'type': 'error',
       'message': 'Offline',
       'position': 'bottom',
-      'length': 'custom',
       'durationMs': 1500,
       'color': 0xaa112233,
       'icon': 'none',
@@ -84,7 +82,6 @@ void main() {
       options: const NativeToastOptions(length: NativeToastLength.never),
     );
 
-    expect(calls.single.arguments, containsPair('length', 'never'));
     expect(calls.single.arguments, containsPair('durationMs', -1));
   });
 

@@ -3,6 +3,7 @@ package dev.eqdevs.toast_native_dev
 import android.app.Activity
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.runtime.mutableStateListOf
@@ -120,6 +121,7 @@ class NativeToastPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
                     ToastOverlay(
                         toasts = toasts,
                         onDismiss = ::dismissById,
+                        onRemoved = ::removeById,
                         onHold = ::pauseTimer,
                         onRelease = ::resumeTimer,
                     )
@@ -171,15 +173,15 @@ class NativeToastPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         val type = args["type"] as? String ?: "success"
         val message = args["message"] as? String ?: ""
         val position = args["position"] as? String ?: "top"
-        val length = args["length"] as? String ?: "short"
-        val durationMs = (args["durationMs"] as? Number)?.toLong() ?: durationFor(length)
+        val durationMs = (args["durationMs"] as? Number)?.toLong() ?: 2_000L
         val color = (args["color"] as? Number)?.toLong()
         val icon = args["icon"] as? String ?: type
         val iconColor = (args["iconColor"] as? Number)?.toLong()
         val dismissDirection = args["dismissDirection"] as? String
             ?: if (position == "top") "up" else "down"
 
-        mainHandler.post { addToast(type, message, position, durationMs, color, icon, iconColor, dismissDirection) }
+        // MethodChannel callbacks already arrive on the main thread.
+        addToast(type, message, position, durationMs, color, icon, iconColor, dismissDirection)
         result.success(null)
     }
 
@@ -213,14 +215,14 @@ class NativeToastPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
 
     private fun scheduleTimer(id: String, durationMs: Long) {
         val runnable = Runnable { dismissById(id) }
-        activeTimers[id] = TimerInfo(runnable, System.currentTimeMillis(), durationMs)
+        activeTimers[id] = TimerInfo(runnable, SystemClock.elapsedRealtime(), durationMs)
         mainHandler.postDelayed(runnable, durationMs)
     }
 
     private fun pauseTimer(id: String) {
         val info = activeTimers.remove(id) ?: return
         mainHandler.removeCallbacks(info.runnable)
-        val elapsed = System.currentTimeMillis() - info.startMs
+        val elapsed = SystemClock.elapsedRealtime() - info.startMs
         val remaining = (info.totalDurationMs - elapsed).coerceAtLeast(200L)
         pausedRemaining[id] = remaining
     }
@@ -236,17 +238,10 @@ class NativeToastPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
         val idx = toasts.indexOfFirst { it.id == id }
         if (idx < 0) return
         toasts[idx] = toasts[idx].copy(visible = false)
-        // +50ms buffer past the nominal exit-animation length so the toast isn't
-        // pulled from the list mid-animation under JVM/GC jitter.
-        mainHandler.postDelayed({ toasts.removeAll { it.id == id } }, ToastAnimationMs + 50L)
+        // Removal happens in removeById once the exit animation reports completion.
     }
 
-    private fun durationFor(length: String): Long = when (length) {
-        "short"  -> 2_000L
-        "medium" -> 4_000L
-        "long"   -> 6_000L
-        "ages"   -> 10_000L
-        "never"  -> -1L
-        else     -> 2_000L
+    private fun removeById(id: String) {
+        toasts.removeAll { it.id == id }
     }
 }

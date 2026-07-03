@@ -180,8 +180,7 @@ const MethodChannel('toast_native_dev/channel');
 | `type` | `success`, `warning`, or `error` |
 | `message` | `String` |
 | `position` | `top` or `bottom` |
-| `length` | Named length |
-| `durationMs` | Duration in milliseconds |
+| `durationMs` | Duration in milliseconds (`-1` = never auto-dismiss) |
 | `color` | ARGB integer |
 | `icon` | `success`, `warning`, `error`, or `none` |
 | `iconColor` | ARGB integer |

@@ -15,7 +15,7 @@ EXTERNAL SOURCES:
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
-  toast_native_dev: c0189d60e9eda497c3f44ea191ce5168eae6699d
+  toast_native_dev: 309f5f46049e028e3ade9e26588dab7b2139bd3e
 
 PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
 

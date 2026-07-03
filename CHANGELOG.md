@@ -1,3 +1,12 @@
+## 0.0.9
+
+* iOS: reuse a single overlay `UIWindow` for all toasts instead of allocating one per toast.
+* Android: remove a toast from the stack exactly when its exit animation completes, instead of after a fixed delay.
+* Use monotonic clocks (`SystemClock.elapsedRealtime` / `systemUptime`) for pause/resume timers so wall-clock changes can't corrupt remaining duration.
+* Drop the `length` argument from the MethodChannel payload; `durationMs` is now the single source of truth on both platforms.
+* Remove the `androidx.compose.material3` dependency from the Android build.
+* **Breaking:** `NativeToastLength.name` has been removed (it was unused internally).
+
 ## 0.0.8
 
 * Update native toast spacing to use 14dp/pt content padding and icon gap.
