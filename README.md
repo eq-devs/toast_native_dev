@@ -13,7 +13,7 @@ Flutter toasts and overlays work normally above Flutter widgets. The problem sta
 | Platform | Native rendering layer |
 |---|---|
 | Android | A `ComposeView` attached to the Activity `DecorView` |
-| iOS | One passthrough `UIWindow` per toast on the active `UIWindowScene` |
+| iOS | One shared passthrough `UIWindow` on the active `UIWindowScene` |
 
 Touches outside the toast pass through to the Flutter app, so the page remains usable while a toast is visible.
 
@@ -21,7 +21,7 @@ Touches outside the toast pass through to the Flutter app, so the page remains u
 
 ```yaml
 dependencies:
-  toast_native_dev: ^0.0.4
+  toast_native_dev: ^0.0.11
 ```
 
 ```dart
@@ -33,7 +33,7 @@ import 'package:toast_native_dev/toast_native_dev.dart';
 ```dart
 await showToast(
   type: ToastType.success,
-  message: 'Profile saved',
+  title: 'Profile saved',
 );
 ```
 
@@ -52,13 +52,11 @@ Default behavior:
 ```dart
 await showToast(
   type: ToastType.warning,
-  message: 'Session expiring soon',
+  title: 'Session expiring soon',
+  subtitle: 'Save your work',
   options: const NativeToastOptions(
     position: ToastPosition.bottom,
     length: NativeToastLength.long,
-    bgColor: Color(0xffCC8E12),
-    icon: NativeToastIcon.warning(color: Color(0xffffffff)),
-    dismissDirection: NativeToastDismissDirection.down,
   ),
 );
 ```
@@ -70,10 +68,13 @@ await showToast(
 ```dart
 Future<void> showToast({
   required ToastType type,
-  required String message,
+  String? title,
+  String? subtitle,
   NativeToastOptions options = const NativeToastOptions(),
 })
 ```
+
+`title` and `subtitle` are optional. A null or blank value is not drawn. If both are missing, `showToast` does nothing.
 
 The returned `Future<void>` completes after the native platform receives the request. It does not wait until the toast disappears.
 
@@ -81,9 +82,10 @@ The returned `Future<void>` completes after the native platform receives the req
 
 | Value | Default color | Default icon |
 |---|---:|---|
-| `ToastType.success` | `0xff1B8918` | Check mark in circle |
-| `ToastType.warning` | `0xffCC8E12` | Info mark in circle |
-| `ToastType.error` | `0xffFF3B30` | X mark in circle |
+| `ToastType.success` | `0xff18A957` | Check circle |
+| `ToastType.error` | `0xffFB2C36` | Close circle |
+| `ToastType.warning` | `0xffF8B632` | Info circle |
+| `ToastType.info` | `0xff969696` | WiFi disconnect |
 
 ### `NativeToastOptions`
 
@@ -118,7 +120,7 @@ Custom durations must be positive. `NativeToastLength.never` is the only non-pos
 ```dart
 await showToast(
   type: ToastType.success,
-  message: 'Saved',
+  title: 'Saved',
   options: const NativeToastOptions(
     length: NativeToastLength.ms(1500),
   ),
@@ -129,9 +131,10 @@ await showToast(
 
 | Value | Behavior |
 |---|---|
-| `NativeToastIcon.success({color})` | Check mark in circle. |
-| `NativeToastIcon.warning({color})` | Info mark in circle. |
-| `NativeToastIcon.error({color})` | X mark in circle. |
+| `NativeToastIcon.success({color})` | Check circle. |
+| `NativeToastIcon.error({color})` | Close circle. |
+| `NativeToastIcon.warning({color})` | Info circle. |
+| `NativeToastIcon.info({color})` | WiFi disconnect. |
 | `NativeToastIcon.none` | Hides the icon. |
 
 Icons are drawn natively; no image assets are required.
@@ -177,12 +180,13 @@ const MethodChannel('toast_native_dev/channel');
 
 | Argument | Type |
 |---|---|
-| `type` | `success`, `warning`, or `error` |
-| `message` | `String` |
+| `type` | `success`, `warning`, `error`, or `info` |
+| `title` | `String` (empty when omitted) |
+| `subtitle` | `String` (empty when omitted) |
 | `position` | `top` or `bottom` |
 | `durationMs` | Duration in milliseconds (`-1` = never auto-dismiss) |
 | `color` | ARGB integer |
-| `icon` | `success`, `warning`, `error`, or `none` |
+| `icon` | `success`, `warning`, `error`, `info`, or `none` |
 | `iconColor` | ARGB integer |
 | `dismissDirection` | `up` or `down` |
 
@@ -204,7 +208,7 @@ iOS code lives in:
 ios/Classes/NativeToastPlugin.swift
 ```
 
-Each toast gets its own passthrough `UIWindow` attached to the active `UIWindowScene`. The window is above Flutter and native platform views, while touches outside the toast pass through to the app.
+One shared passthrough `UIWindow` is attached to the active `UIWindowScene`. The window is above Flutter and native platform views, while touches outside the toast pass through to the app.
 
 ## Development
 
@@ -218,6 +222,26 @@ Format:
 
 ```sh
 dart format .
+```
+
+Unit tests (Dart + Android JUnit):
+
+```sh
+flutter test
+cd example/android && ./gradlew :toast_native_dev:testDebugUnitTest
+```
+
+Native integration tests (needs a device or simulator):
+
+```sh
+cd example
+flutter test integration_test/native_toast_test.dart
+```
+
+iOS XCTest (from `example/ios`, after `pod install`):
+
+```sh
+xcodebuild test -workspace Runner.xcworkspace -scheme Runner -destination 'platform=iOS Simulator,name=iPhone 17 Pro Max' -only-testing:RunnerTests
 ```
 
 Run the example app:

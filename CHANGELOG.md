@@ -1,3 +1,10 @@
+## 0.0.11
+
+* Match JP Notification: `success` / `error` / `warning` / `info` colors and the four type icons.
+* Replace required `message` with optional `title` and `subtitle`. Null or blank lines are not drawn; both missing is a no-op.
+* Add Android JUnit, iOS XCTest, and example integration tests for the native MethodChannel contract.
+* **Breaking:** `showToast(message:)` is now `title` / `subtitle`. Default type colors are `#18A957`, `#FB2C36`, `#F8B632`, `#969696`.
+
 ## 0.0.9
 
 * iOS: reuse a single overlay `UIWindow` for all toasts instead of allocating one per toast.

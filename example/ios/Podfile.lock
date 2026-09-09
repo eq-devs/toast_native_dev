@@ -1,22 +1,28 @@
 PODS:
   - Flutter (1.0.0)
+  - integration_test (0.0.1):
+    - Flutter
   - toast_native_dev (0.0.1):
     - Flutter
 
 DEPENDENCIES:
   - Flutter (from `Flutter`)
+  - integration_test (from `.symlinks/plugins/integration_test/ios`)
   - toast_native_dev (from `.symlinks/plugins/toast_native_dev/ios`)
 
 EXTERNAL SOURCES:
   Flutter:
     :path: Flutter
+  integration_test:
+    :path: ".symlinks/plugins/integration_test/ios"
   toast_native_dev:
     :path: ".symlinks/plugins/toast_native_dev/ios"
 
 SPEC CHECKSUMS:
   Flutter: cabc95a1d2626b1b06e7179b784ebcf0c0cde467
+  integration_test: 4a889634ef21a45d28d50d622cf412dc6d9f586e
   toast_native_dev: 309f5f46049e028e3ade9e26588dab7b2139bd3e
 
-PODFILE CHECKSUM: 3c63482e143d1b91d2d2560aee9fb04ecc74ac7e
+PODFILE CHECKSUM: ed8695ca411b58cc77404c5e06384d2a6356c434
 
 COCOAPODS: 1.16.2

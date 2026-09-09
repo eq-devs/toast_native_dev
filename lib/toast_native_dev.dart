@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
-enum ToastType { success, error, warning }
+enum ToastType { success, error, warning, info }
 
 enum ToastPosition { top, bottom }
 
@@ -23,6 +23,9 @@ class NativeToastIcon {
 
   const NativeToastIcon.error({Color color = const Color(0xffffffff)})
       : this._('error', color);
+
+  const NativeToastIcon.info({Color color = const Color(0xffffffff)})
+      : this._('info', color);
 
   static const none = NativeToastIcon._('none', Color(0x00000000));
 
@@ -66,30 +69,31 @@ class NativeToastOptions {
 
 const _channel = MethodChannel('toast_native_dev/channel');
 
+String _visibleText(String? value) {
+  if (value == null) return '';
+  return value.trim();
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/// Shows a native toast notification above all Flutter widgets and WebViews.
+/// Shows a native toast above Flutter widgets and WebViews.
 ///
-/// Example:
-/// ```dart
-/// showToast(type: ToastType.success, message: "Profile saved!");
+/// [title] and [subtitle] are optional. A null or blank value is not drawn.
+/// If both are missing, this is a no-op.
 ///
-/// showToast(
-///   type: ToastType.warning,
-///   message: "Session expiring soon",
-///   options: NativeToastOptions(
-///     position: ToastPosition.bottom,
-///     length: NativeToastLength.long,
-///     bgColor: Color(0xffCC8E12),
-///     icon: NativeToastIcon.warning(),
-///   ),
-/// );
-/// ```
+/// Icon and background follow [type] unless [NativeToastOptions] overrides them.
 Future<void> showToast({
   required ToastType type,
-  required String message,
+  String? title,
+  String? subtitle,
   NativeToastOptions options = const NativeToastOptions(),
 }) async {
+  final resolvedTitle = _visibleText(title);
+  final resolvedSubtitle = _visibleText(subtitle);
+  if (resolvedTitle.isEmpty && resolvedSubtitle.isEmpty) {
+    return;
+  }
+
   final resolvedPosition = options.position;
   final resolvedLength = options.length;
   if (resolvedLength.durationMs <= 0 && resolvedLength.durationMs != -1) {
@@ -108,7 +112,8 @@ Future<void> showToast({
 
   await _channel.invokeMethod('showToast', {
     'type': type.name,
-    'message': message,
+    'title': resolvedTitle,
+    'subtitle': resolvedSubtitle,
     'position': resolvedPosition.name,
     'durationMs': resolvedLength.durationMs,
     'color': resolvedColor.toARGB32(),
@@ -124,10 +129,12 @@ NativeToastIcon _defaultIconFor(ToastType type) => switch (type) {
       ToastType.success => const NativeToastIcon.success(),
       ToastType.warning => const NativeToastIcon.warning(),
       ToastType.error => const NativeToastIcon.error(),
+      ToastType.info => const NativeToastIcon.info(),
     };
 
 Color _defaultColorFor(ToastType type) => switch (type) {
-      ToastType.success => const Color(0xff1B8918),
-      ToastType.warning => const Color(0xffCC8E12),
-      ToastType.error => const Color(0xffFF3B30),
+      ToastType.success => const Color(0xff18A957),
+      ToastType.warning => const Color(0xffF8B632),
+      ToastType.error => const Color(0xffFB2C36),
+      ToastType.info => const Color(0xff969696),
     };

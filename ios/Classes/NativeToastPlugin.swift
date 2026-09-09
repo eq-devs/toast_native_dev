@@ -44,27 +44,31 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
             return
         }
 
-        let type            = args["type"]            as? String ?? "success"
-        let message         = args["message"]         as? String ?? ""
-        let position        = args["position"]        as? String ?? "top"
-        let duration        = durationFor(durationMs: args["durationMs"])
-        let color           = colorFor(value: args["color"])
-        let icon            = args["icon"]            as? String ?? type
-        let iconColor       = colorFor(value: args["iconColor"]) ?? .white
-        let dismissDirection = args["dismissDirection"] as? String
-            ?? (position == "top" ? "up" : "down")
+        let payload = NativeToastPayload.parse(args)
+        if !payload.shouldShow {
+            result(nil)
+            return
+        }
 
         // MethodChannel callbacks already arrive on the main thread.
-        showToast(type: type, message: message, position: position,
-                  duration: duration, color: color, icon: icon, iconColor: iconColor,
-                  dismissDirection: dismissDirection)
+        showToast(
+            type: payload.type,
+            title: payload.title,
+            subtitle: payload.subtitle,
+            position: payload.position,
+            duration: payload.duration,
+            color: payload.backgroundColor,
+            icon: payload.icon,
+            iconColor: payload.resolvedIconColor,
+            dismissDirection: payload.dismissDirection
+        )
         result(nil)
     }
 
     // ─── Toast presentation ───────────────────────────────────────────────────
 
     private func showToast(
-        type: String, message: String, position: String,
+        type: String, title: String, subtitle: String, position: String,
         duration: TimeInterval, color: UIColor?, icon: String, iconColor: UIColor,
         dismissDirection: String
     ) {
@@ -75,8 +79,8 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         let screenBounds = scene.coordinateSpace.bounds
         let maxWidth = screenBounds.width - 28
 
-        let containerView = buildToastView(type: type, message: message, color: color,
-                                           icon: icon, iconColor: iconColor,
+        let containerView = buildToastView(type: type, title: title, subtitle: subtitle,
+                                           color: color, icon: icon, iconColor: iconColor,
                                            maxWidth: maxWidth)
         let fittingSize = containerView.systemLayoutSizeFitting(
             CGSize(width: maxWidth, height: UIView.layoutFittingCompressedSize.height),
@@ -186,14 +190,15 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
 
     // ─── View builder ─────────────────────────────────────────────────────────
 
-    private func buildToastView(type: String, message: String, color: UIColor?,
-                                icon: String, iconColor: UIColor,
+    private func buildToastView(type: String, title: String, subtitle: String,
+                                color: UIColor?, icon: String, iconColor: UIColor,
                                 maxWidth: CGFloat) -> UIView {
         let bgColor: UIColor = color ?? {
             switch type {
-            case "success": return UIColor(red: 0.11, green: 0.54, blue: 0.09, alpha: 1)
-            case "error":   return UIColor(red: 1.00, green: 0.23, blue: 0.19, alpha: 1)
-            default:        return UIColor(red: 0.80, green: 0.56, blue: 0.07, alpha: 1)
+            case "success": return UIColor(red: 24/255, green: 169/255, blue: 87/255, alpha: 1)
+            case "error":   return UIColor(red: 251/255, green: 44/255, blue: 54/255, alpha: 1)
+            case "info":    return UIColor(red: 150/255, green: 150/255, blue: 150/255, alpha: 1)
+            default:        return UIColor(red: 248/255, green: 182/255, blue: 50/255, alpha: 1)
             }
         }()
         let container = UIView()
@@ -201,35 +206,44 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         container.layer.cornerRadius = 16
         container.layer.masksToBounds = false
         container.layer.shadowColor = UIColor.black.cgColor
-        container.layer.shadowOpacity = 0.22
-        container.layer.shadowRadius = 6
-        container.layer.shadowOffset = CGSize(width: 0, height: 2)
+        container.layer.shadowOpacity = 0.10
+        container.layer.shadowRadius = 4
+        container.layer.shadowOffset = CGSize(width: 0, height: 1)
 
-        // Plain text — no custom line-height paragraph style. A forced line box
-        // taller than the glyph pushes the glyph below the line box centre, so
-        // .center alignment in the stack ends up visually mismatched with the
-        // icon. Natural font metrics keep the glyph centre on the same axis
-        // as the icon centre.
-        let msgLabel = UILabel()
-        msgLabel.text = message
-        msgLabel.textColor = .white
-        msgLabel.font = UIFont.systemFont(ofSize: 14, weight: .medium)
-        msgLabel.numberOfLines = 0
-        msgLabel.translatesAutoresizingMaskIntoConstraints = false
-        msgLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+        let textStack = UIStackView()
+        textStack.axis = .vertical
+        textStack.alignment = .fill
+        textStack.spacing = 0
 
-        // Toast content metrics are kept in sync with the Android renderer.
+        if !title.isEmpty {
+            let titleLabel = UILabel()
+            titleLabel.text = title
+            titleLabel.textColor = .white
+            titleLabel.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+            titleLabel.numberOfLines = 0
+            titleLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+            textStack.addArrangedSubview(titleLabel)
+        }
+        if !subtitle.isEmpty {
+            let subtitleLabel = UILabel()
+            subtitleLabel.text = subtitle
+            subtitleLabel.textColor = .white
+            subtitleLabel.font = UIFont.systemFont(ofSize: 13, weight: .regular)
+            subtitleLabel.numberOfLines = 0
+            textStack.addArrangedSubview(subtitleLabel)
+        }
+
         let stackView = UIStackView()
         stackView.axis = .horizontal
         stackView.alignment = .center
-        stackView.spacing = 14
+        stackView.spacing = 12
         stackView.translatesAutoresizingMaskIntoConstraints = false
         stackView.isLayoutMarginsRelativeArrangement = true
         stackView.directionalLayoutMargins = NSDirectionalEdgeInsets(
-            top: 14,
-            leading: 14,
-            bottom: 14,
-            trailing: 14
+            top: 12,
+            leading: 16,
+            bottom: 12,
+            trailing: 16
         )
         container.addSubview(stackView)
 
@@ -240,23 +254,23 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
             stackView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ]
 
-        if let iconView = makeIconView(icon: icon, color: iconColor) {
+        if let iconView = makeIconView(icon: icon, iconColor: iconColor, glyphColor: bgColor) {
             stackView.addArrangedSubview(iconView)
             constraints.append(contentsOf: [
-                iconView.widthAnchor.constraint(equalToConstant: 20),
-                iconView.heightAnchor.constraint(equalToConstant: 20),
+                iconView.widthAnchor.constraint(equalToConstant: 24),
+                iconView.heightAnchor.constraint(equalToConstant: 24),
             ])
         }
-        stackView.addArrangedSubview(msgLabel)
+        stackView.addArrangedSubview(textStack)
 
         NSLayoutConstraint.activate(constraints)
         container.widthAnchor.constraint(equalToConstant: maxWidth).isActive = true
         return container
     }
 
-    private func makeIconView(icon: String, color: UIColor) -> UIView? {
+    private func makeIconView(icon: String, iconColor: UIColor, glyphColor: UIColor) -> UIView? {
         guard icon != "none" else { return nil }
-        let iconView = ToastIconView(type: icon, color: color)
+        let iconView = ToastIconView(type: icon, iconColor: iconColor, glyphColor: glyphColor)
         iconView.translatesAutoresizingMaskIntoConstraints = false
         return iconView
     }
@@ -472,22 +486,6 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
 
     // ─── Utilities ────────────────────────────────────────────────────────────
 
-    private func durationFor(durationMs: Any?) -> TimeInterval {
-        guard let milliseconds = durationMs as? NSNumber else { return 2 }
-        return milliseconds.doubleValue / 1000
-    }
-
-    private func colorFor(value: Any?) -> UIColor? {
-        guard let number = value as? NSNumber else { return nil }
-        let argb = number.uint32Value
-        return UIColor(
-            red: CGFloat((argb >> 16) & 0xff) / 255,
-            green: CGFloat((argb >> 8) & 0xff) / 255,
-            blue: CGFloat(argb & 0xff) / 255,
-            alpha: CGFloat((argb >> 24) & 0xff) / 255
-        )
-    }
-
     private func activeWindowScene() -> UIWindowScene? {
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         return scenes.first { $0.activationState == .foregroundActive }
@@ -499,11 +497,13 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
 
 private class ToastIconView: UIView {
     private let type: String
-    private let color: UIColor
+    private let iconColor: UIColor
+    private let glyphColor: UIColor
 
-    init(type: String, color: UIColor) {
+    init(type: String, iconColor: UIColor, glyphColor: UIColor) {
         self.type = type
-        self.color = color
+        self.iconColor = iconColor
+        self.glyphColor = glyphColor
         super.init(frame: .zero)
         backgroundColor = .clear
         isOpaque = false
@@ -515,50 +515,106 @@ private class ToastIconView: UIView {
 
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
+        let s = min(rect.width, rect.height) / 24
+        context.saveGState()
+        context.translateBy(x: rect.minX, y: rect.minY)
+        context.scaleBy(x: s, y: s)
 
-        let strokeWidth: CGFloat = 2.4
-        let inset = strokeWidth / 2
-        let circleRect = rect.insetBy(dx: inset, dy: inset)
+        if type == "info" {
+            context.setFillColor(iconColor.cgColor)
+            context.addPath(ToastIconView.wifiFillPath.cgPath)
+            context.fillPath()
+            context.setStrokeColor(iconColor.cgColor)
+            context.setLineWidth(1.3301)
+            context.setLineCap(.round)
+            context.move(to: CGPoint(x: 4.23901, y: 4.16736))
+            context.addLine(to: CGPoint(x: 18.4817, y: 18.4104))
+            context.strokePath()
+            context.addArc(center: CGPoint(x: 12.041, y: 18.8081), radius: 1.27515,
+                           startAngle: 0, endAngle: .pi * 2, clockwise: false)
+            context.fillPath()
+            context.restoreGState()
+            return
+        }
 
-        context.setStrokeColor(color.cgColor)
-        context.setFillColor(color.cgColor)
-        context.setLineWidth(strokeWidth)
+        context.setFillColor(iconColor.cgColor)
+        context.setStrokeColor(iconColor.cgColor)
+        context.setLineWidth(1.5)
+        context.addArc(center: CGPoint(x: 12, y: 12), radius: 10, startAngle: 0, endAngle: .pi * 2, clockwise: false)
+        context.drawPath(using: .fillStroke)
+
+        context.setStrokeColor(glyphColor.cgColor)
+        context.setLineWidth(1.5)
         context.setLineCap(.round)
-        context.strokeEllipse(in: circleRect)
+        context.setLineJoin(.round)
 
         switch type {
         case "success":
-            drawLine(from: CGPoint(x: rect.width * 0.28, y: rect.height * 0.52),
-                     to: CGPoint(x: rect.width * 0.43, y: rect.height * 0.68))
-            drawLine(from: CGPoint(x: rect.width * 0.43, y: rect.height * 0.68),
-                     to: CGPoint(x: rect.width * 0.73, y: rect.height * 0.35))
-
+            context.move(to: CGPoint(x: 8.5, y: 12.5))
+            context.addLine(to: CGPoint(x: 10.5, y: 14.5))
+            context.addLine(to: CGPoint(x: 15.5, y: 9.5))
+            context.strokePath()
         case "error":
-            drawLine(from: CGPoint(x: rect.width * 0.35, y: rect.height * 0.35),
-                     to: CGPoint(x: rect.width * 0.65, y: rect.height * 0.65))
-            drawLine(from: CGPoint(x: rect.width * 0.65, y: rect.height * 0.35),
-                     to: CGPoint(x: rect.width * 0.35, y: rect.height * 0.65))
-
+            context.move(to: CGPoint(x: 14.5, y: 9.5))
+            context.addLine(to: CGPoint(x: 9.5, y: 14.5))
+            context.strokePath()
+            context.move(to: CGPoint(x: 9.5, y: 9.5))
+            context.addLine(to: CGPoint(x: 14.5, y: 14.5))
+            context.strokePath()
         default:
-            drawLine(from: CGPoint(x: rect.midX, y: rect.height * 0.42),
-                     to: CGPoint(x: rect.midX, y: rect.height * 0.70))
-            context.fillEllipse(
-                in: CGRect(
-                    x: rect.midX - strokeWidth / 2,
-                    y: rect.height * 0.30 - strokeWidth / 2,
-                    width: strokeWidth,
-                    height: strokeWidth
-                )
-            )
+            context.move(to: CGPoint(x: 12, y: 17))
+            context.addLine(to: CGPoint(x: 12, y: 11))
+            context.strokePath()
+            context.setFillColor(iconColor.cgColor)
+            context.setStrokeColor(glyphColor.cgColor)
+            context.setLineWidth(1)
+            context.addArc(center: CGPoint(x: 12, y: 8), radius: 0.5, startAngle: 0, endAngle: .pi * 2, clockwise: false)
+            context.drawPath(using: .fillStroke)
         }
+
+        context.restoreGState()
     }
 
-    private func drawLine(from start: CGPoint, to end: CGPoint) {
-        guard let context = UIGraphicsGetCurrentContext() else { return }
-        context.move(to: start)
-        context.addLine(to: end)
-        context.strokePath()
-    }
+    private static let wifiFillPath: UIBezierPath = {
+        let path = UIBezierPath()
+        path.move(to: CGPoint(x: 8.60791, y: 15.5467))
+        path.addCurve(to: CGPoint(x: 12.438, y: 14.0594), controlPoint1: CGPoint(x: 9.65063, y: 14.4213), controlPoint2: CGPoint(x: 11.0666, y: 13.9257))
+        path.addLine(to: CGPoint(x: 15.3364, y: 16.9579))
+        path.addCurve(to: CGPoint(x: 13.9282, y: 16.9032), controlPoint1: CGPoint(x: 14.9322, y: 17.3308), controlPoint2: CGPoint(x: 14.3022, y: 17.3068))
+        path.addCurve(to: CGPoint(x: 10.0718, y: 16.9032), controlPoint1: CGPoint(x: 12.8538, y: 15.7435), controlPoint2: CGPoint(x: 11.1462, y: 15.7435))
+        path.addCurve(to: CGPoint(x: 8.66162, y: 16.9569), controlPoint1: CGPoint(x: 9.69733, y: 17.3072), controlPoint2: CGPoint(x: 9.06574, y: 17.3313))
+        path.addCurve(to: CGPoint(x: 8.60791, y: 15.5467), controlPoint1: CGPoint(x: 8.25755, y: 16.5824), controlPoint2: CGPoint(x: 8.2335, y: 15.9508))
+        path.close()
+        path.move(to: CGPoint(x: 10.5337, y: 12.1551))
+        path.addCurve(to: CGPoint(x: 7.41162, y: 14.0311), controlPoint1: CGPoint(x: 9.39159, y: 12.4416), controlPoint2: CGPoint(x: 8.30586, y: 13.0659))
+        path.addCurve(to: CGPoint(x: 6.00147, y: 14.0848), controlPoint1: CGPoint(x: 7.03719, y: 14.4352), controlPoint2: CGPoint(x: 6.40562, y: 14.4592))
+        path.addCurve(to: CGPoint(x: 5.94776, y: 12.6756), controlPoint1: CGPoint(x: 5.59764, y: 13.7104), controlPoint2: CGPoint(x: 5.57366, y: 13.0797))
+        path.addCurve(to: CGPoint(x: 8.95654, y: 10.578), controlPoint1: CGPoint(x: 6.82913, y: 11.7243), controlPoint2: CGPoint(x: 7.85866, y: 11.0262))
+        path.addLine(to: CGPoint(x: 10.5337, y: 12.1551))
+        path.close()
+        path.move(to: CGPoint(x: 11.7476, y: 9.98325))
+        path.addCurve(to: CGPoint(x: 18.0522, y: 12.6756), controlPoint1: CGPoint(x: 14.0238, y: 9.91151), controlPoint2: CGPoint(x: 16.3217, y: 10.8077))
+        path.addCurve(to: CGPoint(x: 17.9985, y: 14.0848), controlPoint1: CGPoint(x: 18.4265, y: 13.0797), controlPoint2: CGPoint(x: 18.4025, y: 13.7104))
+        path.addCurve(to: CGPoint(x: 16.5884, y: 14.0311), controlPoint1: CGPoint(x: 17.5944, y: 14.4592), controlPoint2: CGPoint(x: 16.9628, y: 14.4352))
+        path.addCurve(to: CGPoint(x: 14.1235, y: 12.3582), controlPoint1: CGPoint(x: 15.8675, y: 13.253), controlPoint2: CGPoint(x: 15.0225, y: 12.6952))
+        path.addLine(to: CGPoint(x: 11.7476, y: 9.98325))
+        path.close()
+        path.move(to: CGPoint(x: 7.4458, y: 9.06723))
+        path.addCurve(to: CGPoint(x: 4.75147, y: 11.16), controlPoint1: CGPoint(x: 6.47472, y: 9.5887), controlPoint2: CGPoint(x: 5.56231, y: 10.2849))
+        path.addCurve(to: CGPoint(x: 3.34131, y: 11.2137), controlPoint1: CGPoint(x: 4.37703, y: 11.5642), controlPoint2: CGPoint(x: 3.74546, y: 11.5882))
+        path.addCurve(to: CGPoint(x: 3.2876, y: 9.80454), controlPoint1: CGPoint(x: 2.93746, y: 10.8393), controlPoint2: CGPoint(x: 2.91343, y: 10.2086))
+        path.addCurve(to: CGPoint(x: 5.98096, y: 7.60239), controlPoint1: CGPoint(x: 4.10747, y: 8.9196), controlPoint2: CGPoint(x: 5.01521, y: 8.18517))
+        path.addLine(to: CGPoint(x: 7.4458, y: 9.06723))
+        path.close()
+        path.move(to: CGPoint(x: 8.29346, y: 6.52817))
+        path.addCurve(to: CGPoint(x: 20.7124, y: 9.80454), controlPoint1: CGPoint(x: 12.5347, y: 5.09301), controlPoint2: CGPoint(x: 17.3591, y: 6.18512))
+        path.addCurve(to: CGPoint(x: 20.6587, y: 11.2137), controlPoint1: CGPoint(x: 21.0867, y: 10.2086), controlPoint2: CGPoint(x: 21.0626, y: 10.8393))
+        path.addCurve(to: CGPoint(x: 19.2485, y: 11.16), controlPoint1: CGPoint(x: 20.2545, y: 11.5882), controlPoint2: CGPoint(x: 19.623, y: 11.5642))
+        path.addCurve(to: CGPoint(x: 9.91065, y: 8.14633), controlPoint1: CGPoint(x: 16.7059, y: 8.4158), controlPoint2: CGPoint(x: 13.1767, y: 7.41285))
+        path.addLine(to: CGPoint(x: 8.29346, y: 6.52817))
+        path.close()
+        return path
+    }()
 }
 
 // ─── Passthrough window root ──────────────────────────────────────────────────

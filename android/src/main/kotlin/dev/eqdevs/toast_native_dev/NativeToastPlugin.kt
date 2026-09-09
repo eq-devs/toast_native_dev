@@ -170,46 +170,34 @@ class NativeToastPlugin : FlutterPlugin, MethodCallHandler, ActivityAware {
             result.error("INVALID_ARGS", "Arguments must be a map", null)
             return
         }
-        val type = args["type"] as? String ?: "success"
-        val message = args["message"] as? String ?: ""
-        val position = args["position"] as? String ?: "top"
-        val durationMs = (args["durationMs"] as? Number)?.toLong() ?: 2_000L
-        val color = (args["color"] as? Number)?.toLong()
-        val icon = args["icon"] as? String ?: type
-        val iconColor = (args["iconColor"] as? Number)?.toLong()
-        val dismissDirection = args["dismissDirection"] as? String
-            ?: if (position == "top") "up" else "down"
+        val request = ToastRequest.from(args)
+        if (!request.shouldShow) {
+            result.success(null)
+            return
+        }
 
         // MethodChannel callbacks already arrive on the main thread.
-        addToast(type, message, position, durationMs, color, icon, iconColor, dismissDirection)
+        addToast(request)
         result.success(null)
     }
 
     // ─── Toast management ─────────────────────────────────────────────────────
 
-    private fun addToast(
-        type: String,
-        message: String,
-        position: String,
-        durationMs: Long,
-        color: Long?,
-        icon: String,
-        iconColor: Long?,
-        dismissDirection: String,
-    ) {
+    private fun addToast(request: ToastRequest) {
         val toast = ToastData(
-            type = type,
-            message = message,
-            position = position,
-            dismissDirection = dismissDirection,
-            color = color,
-            icon = icon,
-            iconColor = iconColor,
+            type = request.type,
+            title = request.title,
+            subtitle = request.subtitle,
+            position = request.position,
+            dismissDirection = request.dismissDirection,
+            color = request.color,
+            icon = request.icon,
+            iconColor = request.iconColor,
         )
         toasts.add(toast)
 
-        if (durationMs > 0) {
-            scheduleTimer(toast.id, durationMs)
+        if (request.durationMs > 0) {
+            scheduleTimer(toast.id, request.durationMs)
         }
     }
 

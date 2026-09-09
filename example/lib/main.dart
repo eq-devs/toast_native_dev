@@ -44,7 +44,7 @@ class _ToastTestLabState extends State<ToastTestLab> {
     for (var i = 0; i < count && mounted; i++) {
       await showToast(
         type: ToastType.values[i % ToastType.values.length],
-        message: 'Burst ${i + 1}/$count',
+        title: 'Burst ${i + 1}/$count',
         options: NativeToastOptions(
           position: position,
           length: const NativeToastLength.ms(900),
@@ -64,7 +64,7 @@ class _ToastTestLabState extends State<ToastTestLab> {
     for (var i = 0; i < 8; i++) {
       await showToast(
         type: ToastType.values[i % ToastType.values.length],
-        message:
+        title:
             i.isEven ? 'Top stack item ${i + 1}' : 'Bottom stack item ${i + 1}',
         options: NativeToastOptions(
           position: i.isEven ? ToastPosition.top : ToastPosition.bottom,
@@ -80,13 +80,13 @@ class _ToastTestLabState extends State<ToastTestLab> {
   Future<void> _runFullSizeCases() async {
     await showToast(
       type: ToastType.success,
-      message:
+      title:
           'Full width multiline toast: Profile saved across a long title, wrapped message, narrow phone width, landscape tablet width, and split-screen windows.',
       options: const NativeToastOptions(length: NativeToastLength.long),
     );
     await showToast(
       type: ToastType.warning,
-      message: '中文长文案测试：用于检查不同屏幕宽度、字体回退、换行、图标对齐和安全区边距。',
+      title: '中文长文案测试：用于检查不同屏幕宽度、字体回退、换行、图标对齐和安全区边距。',
       options: const NativeToastOptions(
         position: ToastPosition.bottom,
         length: NativeToastLength.long,
@@ -94,7 +94,7 @@ class _ToastTestLabState extends State<ToastTestLab> {
     );
     await showToast(
       type: ToastType.error,
-      message:
+      title:
           'SuperLongTokenWithoutSpaces_abcdefghijklmnopqrstuvwxyz_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789',
       options: const NativeToastOptions(
         length: NativeToastLength.long,
@@ -106,14 +106,12 @@ class _ToastTestLabState extends State<ToastTestLab> {
   Future<void> _runRiskCases() async {
     await showToast(
       type: ToastType.warning,
-      message:
-          'Never toast: swipe to dismiss, verify it does not block touches.',
+      title: 'Never toast: swipe to dismiss, verify it does not block touches.',
       options: const NativeToastOptions(length: NativeToastLength.never),
     );
     await showToast(
       type: ToastType.success,
-      message:
-          'Transparent custom color should not crash native color parsing.',
+      title: 'Transparent custom color should not crash native color parsing.',
       options: const NativeToastOptions(
         bgColor: Color(0xAA111111),
         icon: NativeToastIcon.success(color: Color(0xFFFFD166)),
@@ -121,7 +119,7 @@ class _ToastTestLabState extends State<ToastTestLab> {
     );
     await showToast(
       type: ToastType.error,
-      message: 'Bottom toast with upward dismiss direction.',
+      title: 'Bottom toast with upward dismiss direction.',
       options: const NativeToastOptions(
         position: ToastPosition.bottom,
         dismissDirection: NativeToastDismissDirection.up,
@@ -141,13 +139,64 @@ class _ToastTestLabState extends State<ToastTestLab> {
           _DeviceInfo(media: media, sentCount: _sentCount),
           const SizedBox(height: 16),
           _Section(
+            title: 'JP Notification',
+            children: [
+              _ActionButton(
+                label: 'Success',
+                onPressed: () => showToast(
+                  type: ToastType.success,
+                  title: 'Title',
+                  subtitle: 'Subtitle',
+                ),
+              ),
+              _ActionButton(
+                label: 'Error',
+                onPressed: () => showToast(
+                  type: ToastType.error,
+                  title: 'Title',
+                  subtitle: 'Subtitle',
+                ),
+              ),
+              _ActionButton(
+                label: 'Warning',
+                onPressed: () => showToast(
+                  type: ToastType.warning,
+                  title: 'Title',
+                  subtitle: 'Subtitle',
+                ),
+              ),
+              _ActionButton(
+                label: 'Info',
+                onPressed: () => showToast(
+                  type: ToastType.info,
+                  title: 'Интернет үзіліп қалды',
+                  subtitle: 'Желіні тексеріп, қайта жүктеп көрiңіз',
+                ),
+              ),
+              _ActionButton(
+                label: 'Title only',
+                onPressed: () => showToast(
+                  type: ToastType.success,
+                  title: 'Title',
+                ),
+              ),
+              _ActionButton(
+                label: 'Subtitle only',
+                onPressed: () => showToast(
+                  type: ToastType.warning,
+                  subtitle: 'Subtitle',
+                ),
+              ),
+            ],
+          ),
+          _Section(
             title: 'Basic',
             children: [
               _ActionButton(
                 label: 'Success Toast',
                 onPressed: () => showToast(
                   type: ToastType.success,
-                  message:
+                  title:
                       'Profile saved!Profile                                                                 ',
                   options: const NativeToastOptions(
                     length: NativeToastLength.medium,
@@ -158,20 +207,18 @@ class _ToastTestLabState extends State<ToastTestLab> {
                 label: 'Error Toast',
                 onPressed: () => showToast(
                   type: ToastType.error,
-                  message: 'Something went wrong.',
+                  title: 'Something went wrong.',
                 ),
               ),
               _ActionButton(
                 label: 'Warning Bottom',
                 onPressed: () => showToast(
                   type: ToastType.warning,
-                  message: 'Session expiring soon',
+                  title: 'Session expiring soon',
+                  subtitle: 'Save your work',
                   options: const NativeToastOptions(
                     position: ToastPosition.bottom,
                     length: NativeToastLength.long,
-                    bgColor: Color(0xffCC8E12),
-                    icon: NativeToastIcon.warning(color: Color(0xffffffff)),
-                    dismissDirection: NativeToastDismissDirection.down,
                   ),
                 ),
               ),
@@ -179,7 +226,7 @@ class _ToastTestLabState extends State<ToastTestLab> {
                 label: 'Custom 1500ms',
                 onPressed: () => showToast(
                   type: ToastType.success,
-                  message: 'Custom 1500ms toast',
+                  title: 'Custom 1500ms toast',
                   options: const NativeToastOptions(
                     length: NativeToastLength.ms(1500),
                   ),

@@ -23,26 +23,52 @@ void main() {
   });
 
   test('showToast sends the expected default channel payload', () async {
-    await showToast(type: ToastType.success, message: 'Saved');
+    await showToast(type: ToastType.success, title: 'Saved');
 
     expect(calls, hasLength(1));
     expect(calls.single.method, 'showToast');
     expect(calls.single.arguments, {
       'type': 'success',
-      'message': 'Saved',
+      'title': 'Saved',
+      'subtitle': '',
       'position': 'top',
       'durationMs': 2000,
-      'color': 0xff1b8918,
+      'color': 0xff18a957,
       'icon': 'success',
       'iconColor': 0xffffffff,
       'dismissDirection': 'up',
     });
   });
 
+  test('null title and subtitle is a no-op', () async {
+    await showToast(type: ToastType.success);
+    await showToast(type: ToastType.error, title: '  ', subtitle: '');
+    expect(calls, isEmpty);
+  });
+
+  test('subtitle only is forwarded without a title', () async {
+    await showToast(type: ToastType.warning, subtitle: 'Save your work');
+    expect(calls.single.arguments, containsPair('title', ''));
+    expect(calls.single.arguments, containsPair('subtitle', 'Save your work'));
+    expect(calls.single.arguments, containsPair('icon', 'warning'));
+    expect(calls.single.arguments, containsPair('color', 0xfff8b632));
+  });
+
+  test('info type uses gray and the wifi icon', () async {
+    await showToast(
+      type: ToastType.info,
+      title: 'Интернет үзіліп қалды',
+      subtitle: 'Желіні тексеріп, қайта жүктеп көрiңіз',
+    );
+    expect(calls.single.arguments, containsPair('type', 'info'));
+    expect(calls.single.arguments, containsPair('color', 0xff969696));
+    expect(calls.single.arguments, containsPair('icon', 'info'));
+  });
+
   test('bottom position defaults dismiss direction to down', () async {
     await showToast(
       type: ToastType.warning,
-      message: 'Expiring',
+      title: 'Expiring',
       options: const NativeToastOptions(position: ToastPosition.bottom),
     );
 
@@ -53,7 +79,7 @@ void main() {
   test('custom options are forwarded to native platforms', () async {
     await showToast(
       type: ToastType.error,
-      message: 'Offline',
+      title: 'Offline',
       options: const NativeToastOptions(
         position: ToastPosition.bottom,
         length: NativeToastLength.ms(1500),
@@ -65,7 +91,8 @@ void main() {
 
     expect(calls.single.arguments, {
       'type': 'error',
-      'message': 'Offline',
+      'title': 'Offline',
+      'subtitle': '',
       'position': 'bottom',
       'durationMs': 1500,
       'color': 0xaa112233,
@@ -78,7 +105,7 @@ void main() {
   test('never duration is forwarded as -1', () async {
     await showToast(
       type: ToastType.warning,
-      message: 'Pinned',
+      title: 'Pinned',
       options: const NativeToastOptions(length: NativeToastLength.never),
     );
 
@@ -89,7 +116,7 @@ void main() {
     expect(
       () => showToast(
         type: ToastType.success,
-        message: 'Invalid',
+        title: 'Invalid',
         options: const NativeToastOptions(length: NativeToastLength.ms(0)),
       ),
       throwsArgumentError,
