@@ -3,22 +3,66 @@ import UIKit
 
 public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDelegate {
 
+    // Toasts on screen (including ones playing their exit animation).
     private var activeToasts: [ToastEntry] = []
     // Single shared window hosting every toast — UIWindow is the most expensive
     // UIKit object to create, so we make one lazily and keep it for the app's
     // lifetime instead of one per toast.
     private var overlayWindow: PassthroughWindow?
-    private let toastAnimationOvershoot: CGFloat = 12
-    private let toastDismissThreshold: CGFloat = 56
-    private let toastAnimationDuration: TimeInterval = 0.35
+    // Keyboard frame in screen coordinates, .null while it is hidden.
+    private var keyboardFrame: CGRect = .null
+
+    // Layout — kept in sync with the Android renderer.
+    private let edgeMargin: CGFloat = 14
+    private let toastGap: CGFloat = 8
+    private let maxToastWidth: CGFloat = 520
+    private let minToastHeight: CGFloat = 40
+
+    // Motion spec — kept in sync with the Android renderer.
+    private let enterDuration: TimeInterval = 0.3
+    private let exitDuration: TimeInterval = 0.2
+    private let exitFadeDuration: TimeInterval = 0.14   // fade ends in the first 70%
+    private let reflowDuration: TimeInterval = 0.3
+    private let reducedMotionDuration: TimeInterval = 0.2
+    private let enterCurve = (CGPoint(x: 0.2, y: 0), CGPoint(x: 0, y: 1))
+    private let exitCurve = (CGPoint(x: 0.3, y: 0), CGPoint(x: 1, y: 1))
+
+    // Gestures.
+    private let dismissThreshold: CGFloat = 56
+    private let flickVelocity: CGFloat = 800      // pt/s toward the dismiss edge
+    private let reverseVelocity: CGFloat = 100    // pt/s back toward rest
+    private let rubberBand: CGFloat = 0.18        // wrong-direction drag follows 18%
+    private let armedAlpha: CGFloat = 0.6
+    private let settleDamping: CGFloat = 0.85
+
+    // Timers.
+    private let resumeGrace: TimeInterval = 1.5
+    private let voiceOverMinDuration: TimeInterval = 6
 
     struct ToastEntry {
+        let id: String
         let containerView: UIView
-        let position: String
-        let dismissDirection: String
+        var position: String
+        var dismissDirection: String
         var dismissWorkItem: DispatchWorkItem?
         var timerFireUptime: TimeInterval?   // nil when paused or length == "never"
         var remainingDuration: TimeInterval  // updated on pause
+        var isDismissing = false             // exit animation running
+    }
+
+    public override init() {
+        super.init()
+        let center = NotificationCenter.default
+        center.addObserver(self, selector: #selector(keyboardWillChangeFrame(_:)),
+                           name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
+        center.addObserver(self, selector: #selector(keyboardWillHide(_:)),
+                           name: UIResponder.keyboardWillHideNotification, object: nil)
+        center.addObserver(self, selector: #selector(contentSizeCategoryDidChange(_:)),
+                           name: UIContentSizeCategory.didChangeNotification, object: nil)
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
     }
 
     // ─── Registration ─────────────────────────────────────────────────────────
@@ -34,92 +78,110 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
 
     // ─── MethodChannel handler ────────────────────────────────────────────────
 
+    // MethodChannel callbacks already arrive on the main thread.
     public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
-        guard call.method == "showToast" else {
-            result(FlutterMethodNotImplemented)
-            return
-        }
-        guard let args = call.arguments as? [String: Any] else {
-            result(FlutterError(code: "INVALID_ARGS", message: "Expected a dictionary", details: nil))
-            return
-        }
-
-        let payload = NativeToastPayload.parse(args)
-        if !payload.shouldShow {
+        switch call.method {
+        case "showToast":
+            guard let args = call.arguments as? [String: Any] else {
+                result(FlutterError(code: "INVALID_ARGS", message: "Expected a dictionary", details: nil))
+                return
+            }
+            let payload = NativeToastPayload.parse(args)
+            if payload.shouldShow {
+                show(payload)
+            }
             result(nil)
-            return
-        }
 
-        // MethodChannel callbacks already arrive on the main thread.
-        showToast(
-            type: payload.type,
-            title: payload.title,
-            subtitle: payload.subtitle,
-            position: payload.position,
-            duration: payload.duration,
-            color: payload.backgroundColor,
-            icon: payload.icon,
-            iconColor: payload.resolvedIconColor,
-            dismissDirection: payload.dismissDirection
-        )
-        result(nil)
+        case "dismissToast":
+            guard let id = (call.arguments as? [String: Any])?["id"] as? String else {
+                result(FlutterError(code: "INVALID_ARGS", message: "Expected a string id", details: nil))
+                return
+            }
+            for entry in activeToasts where entry.id == id {
+                dismissToast(view: entry.containerView)
+            }
+            result(nil)
+
+        case "dismissAll":
+            for entry in activeToasts {
+                dismissToast(view: entry.containerView)
+            }
+            result(nil)
+
+        default:
+            result(FlutterMethodNotImplemented)
+        }
     }
 
     // ─── Toast presentation ───────────────────────────────────────────────────
 
-    private func showToast(
-        type: String, title: String, subtitle: String, position: String,
-        duration: TimeInterval, color: UIColor?, icon: String, iconColor: UIColor,
-        dismissDirection: String
-    ) {
+    private func edge(of position: String) -> String {
+        position == "top" ? "top" : "bottom"
+    }
+
+    private func show(_ payload: NativeToastPayload) {
+        // Same id already on screen: update it in place and restart its timer.
+        if let idx = activeToasts.firstIndex(where: { $0.id == payload.id && !$0.isDismissing }) {
+            update(entryAt: idx, with: payload)
+        } else {
+            present(payload)
+        }
+    }
+
+    private func present(_ payload: NativeToastPayload) {
         guard let toastWindow = presentationWindow(),
-              let scene = toastWindow.windowScene,
               let rootView = toastWindow.rootViewController?.view else { return }
 
-        let screenBounds = scene.coordinateSpace.bounds
-        let maxWidth = screenBounds.width - 28
+        let toastView = ToastView(payload: payload)
+        toastView.onClose = { [weak self, weak toastView] in
+            guard let self = self, let toastView = toastView else { return }
+            self.dismissToast(view: toastView)
+        }
+        rootView.addSubview(toastView)
 
-        let containerView = buildToastView(type: type, title: title, subtitle: subtitle,
-                                           color: color, icon: icon, iconColor: iconColor,
-                                           maxWidth: maxWidth)
-        let fittingSize = containerView.systemLayoutSizeFitting(
-            CGSize(width: maxWidth, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
-        )
-        let toastWidth = maxWidth
-        let toastHeight = max(fittingSize.height, 40)
-
-        let stackedOffset = stackOffset(for: position)
-        let safeInsets = scene.windows.first(where: { $0.isKeyWindow })?.safeAreaInsets ?? .zero
-        let edgeMargin: CGFloat = 14
-        let topMargin = max(edgeMargin, safeInsets.top + 14)
-        let bottomMargin = max(edgeMargin, safeInsets.bottom + 14)
-        let xPos = (screenBounds.width - toastWidth) / 2
-        let yPos: CGFloat = position == "top"
-            ? topMargin + stackedOffset
-            : screenBounds.height - bottomMargin - toastHeight - stackedOffset
-
-        containerView.frame = CGRect(x: xPos, y: yPos, width: toastWidth, height: toastHeight)
-        rootView.addSubview(containerView)
-
-        let entry = ToastEntry(
-            containerView: containerView,
-            position: position,
-            dismissDirection: dismissDirection,
+        activeToasts.append(ToastEntry(
+            id: payload.id,
+            containerView: toastView,
+            position: payload.position,
+            dismissDirection: payload.dismissDirection,
             dismissWorkItem: nil,
             timerFireUptime: nil,
-            remainingDuration: max(duration, 0)
-        )
-        activeToasts.append(entry)
-        rebuildOffsets()
+            remainingDuration: max(payload.duration, 0)
+        ))
 
-        animateIn(view: containerView, position: position)
-        attachGestures(to: containerView)
+        resize(toastView, in: rootView)
+        // The new toast is placed directly; its neighbours slide to make room.
+        layoutStack(animated: true, placing: toastView)
+        animateIn(view: toastView, position: payload.position)
+        if payload.iconAnimation { toastView.playIconEntrance() }
+        attachGestures(to: toastView)
+        startTimer(forView: toastView, duration: payload.duration)
+        announce(toastView)
+    }
 
-        if duration > 0 {
-            scheduleTimer(forView: containerView, duration: duration)
-        }
+    private func update(entryAt idx: Int, with payload: NativeToastPayload) {
+        guard let toastView = activeToasts[idx].containerView as? ToastView,
+              let rootView = toastView.superview else { return }
+        activeToasts[idx].dismissWorkItem?.cancel()
+        activeToasts[idx].dismissWorkItem = nil
+        activeToasts[idx].timerFireUptime = nil
+        activeToasts[idx].remainingDuration = max(payload.duration, 0)
+        activeToasts[idx].position = payload.position
+        activeToasts[idx].dismissDirection = payload.dismissDirection
+
+        toastView.configure(with: payload)
+        if payload.iconAnimation { toastView.playIconEntrance() }
+        resize(toastView, in: rootView)
+        layoutStack(animated: true)
+        startTimer(forView: toastView, duration: payload.duration)
+        announce(toastView)
+    }
+
+    // Screen readers get the message the moment it appears, so reading it never
+    // depends on how long the toast stays visible.
+    private func announce(_ toastView: ToastView) {
+        guard UIAccessibility.isVoiceOverRunning else { return }
+        UIAccessibility.post(notification: .announcement, argument: toastView.spokenText)
     }
 
     // Returns the shared overlay window, creating it on first use or after its
@@ -145,21 +207,137 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         rootVC.view.frame = window.frame
         rootVC.view.backgroundColor = .clear
         rootVC.view.isUserInteractionEnabled = true
+        // Rotation, split view and safe-area changes re-lay out visible toasts.
+        (rootVC.view as? PassthroughView)?.onGeometryChange = { [weak self] in
+            self?.relayoutAll()
+        }
         window.rootViewController = rootVC
         window.isHidden = false
         overlayWindow = window
         return window
     }
 
+    // ─── Layout ───────────────────────────────────────────────────────────────
+
+    private struct StackMetrics {
+        let width: CGFloat
+        let centerX: CGFloat
+        let top: CGFloat      // y of the first top toast's upper edge
+        let bottom: CGFloat   // y of the first bottom toast's lower edge
+    }
+
+    private func stackMetrics(in rootView: UIView) -> StackMetrics {
+        let bounds = rootView.bounds
+        let keyWindow = rootView.window?.windowScene?.windows.first(where: { $0.isKeyWindow })
+        let safe = keyWindow?.safeAreaInsets ?? rootView.safeAreaInsets
+        let safeWidth = bounds.width - safe.left - safe.right
+
+        // Bottom toasts sit above the keyboard while it is showing.
+        var keyboardOverlap: CGFloat = 0
+        if !keyboardFrame.isNull {
+            let frameInView = rootView.convert(keyboardFrame, from: nil)
+            keyboardOverlap = max(0, bounds.maxY - frameInView.minY)
+        }
+
+        return StackMetrics(
+            width: max(0, min(safeWidth - edgeMargin * 2, maxToastWidth)),
+            centerX: safe.left + safeWidth / 2,
+            top: safe.top + edgeMargin,
+            bottom: bounds.height - max(safe.bottom, keyboardOverlap) - edgeMargin
+        )
+    }
+
+    private func resize(_ toastView: ToastView, in rootView: UIView) {
+        let width = stackMetrics(in: rootView).width
+        let height = max(toastView.fittingHeight(forWidth: width), minToastHeight)
+        toastView.bounds = CGRect(x: 0, y: 0, width: width, height: height)
+    }
+
+    // Positions every toast that is not on its way out. Positions are set
+    // through `center`, never `frame`, because a drag may have set a transform.
+    private func layoutStack(animated: Bool, placing newView: UIView? = nil) {
+        guard let rootView = overlayWindow?.rootViewController?.view else { return }
+        let metrics = stackMetrics(in: rootView)
+
+        var topY = metrics.top
+        for entry in activeToasts where edge(of: entry.position) == "top" && !entry.isDismissing {
+            let view = entry.containerView
+            let height = view.bounds.height
+            move(view, to: CGPoint(x: metrics.centerX, y: topY + height / 2),
+                 animated: animated && view !== newView)
+            topY += height + toastGap
+        }
+
+        // Reversed so the newest bottom toast is closest to the bottom edge.
+        var bottomY = metrics.bottom
+        for entry in activeToasts.reversed()
+        where edge(of: entry.position) == "bottom" && !entry.isDismissing {
+            let view = entry.containerView
+            let height = view.bounds.height
+            move(view, to: CGPoint(x: metrics.centerX, y: bottomY - height / 2),
+                 animated: animated && view !== newView)
+            bottomY -= height + toastGap
+        }
+    }
+
+    private func move(_ view: UIView, to target: CGPoint, animated: Bool) {
+        if abs(view.center.x - target.x) < 0.5 && abs(view.center.y - target.y) < 0.5 { return }
+        guard animated, !UIAccessibility.isReduceMotionEnabled else {
+            view.center = target
+            return
+        }
+        UIViewPropertyAnimator(
+            duration: reflowDuration, controlPoint1: enterCurve.0, controlPoint2: enterCurve.1
+        ) {
+            view.center = target
+        }.startAnimation()
+    }
+
+    // Re-measures and repositions everything, e.g. after rotation, a safe-area
+    // change or a Dynamic Type change.
+    private func relayoutAll() {
+        guard let rootView = overlayWindow?.rootViewController?.view else { return }
+        for entry in activeToasts {
+            if let toastView = entry.containerView as? ToastView {
+                resize(toastView, in: rootView)
+            }
+        }
+        layoutStack(animated: false)
+    }
+
+    @objc private func keyboardWillChangeFrame(_ note: Notification) {
+        guard let frame = (note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? NSValue)?
+            .cgRectValue else { return }
+        keyboardFrame = frame
+        layoutStack(animated: true)
+    }
+
+    @objc private func keyboardWillHide(_ note: Notification) {
+        keyboardFrame = .null
+        layoutStack(animated: true)
+    }
+
+    @objc private func contentSizeCategoryDidChange(_ note: Notification) {
+        // Let the labels pick up their new fonts first.
+        DispatchQueue.main.async { [weak self] in self?.relayoutAll() }
+    }
+
     // ─── Timer scheduling / pause / resume ───────────────────────────────────
+
+    private func startTimer(forView view: UIView, duration: TimeInterval) {
+        guard duration > 0 else { return }
+        // VoiceOver users need time to reach the toast after hearing it.
+        let effective = UIAccessibility.isVoiceOverRunning
+            ? max(duration, voiceOverMinDuration) : duration
+        scheduleTimer(forView: view, duration: effective)
+    }
 
     private func scheduleTimer(forView view: UIView, duration: TimeInterval) {
         guard let idx = activeToasts.firstIndex(where: { $0.containerView === view }) else { return }
 
         let workItem = DispatchWorkItem { [weak self, weak view] in
-            guard let self = self, let view = view,
-                  let current = self.activeToasts.first(where: { $0.containerView === view }) else { return }
-            self.dismissToast(entry: current)
+            guard let self = self, let view = view else { return }
+            self.dismissToast(view: view)
         }
         activeToasts[idx].dismissWorkItem = workItem
         // Monotonic clock — wall time (Date) can jump under NTP sync or manual
@@ -175,233 +353,114 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
 
         activeToasts[idx].dismissWorkItem?.cancel()
         activeToasts[idx].dismissWorkItem = nil
-        let remaining = max(fireUptime - ProcessInfo.processInfo.systemUptime, 0.2)
-        activeToasts[idx].remainingDuration = remaining
+        // Kept strictly positive so resume can tell a paused timer from "never".
+        activeToasts[idx].remainingDuration =
+            max(fireUptime - ProcessInfo.processInfo.systemUptime, 0.001)
         activeToasts[idx].timerFireUptime = nil
     }
 
     private func resumeTimer(forView view: UIView) {
         guard let idx = activeToasts.firstIndex(where: { $0.containerView === view }) else { return }
+        guard !activeToasts[idx].isDismissing else { return }
         guard activeToasts[idx].timerFireUptime == nil else { return } // already running
         let remaining = activeToasts[idx].remainingDuration
         guard remaining > 0 else { return } // "never" toast — don't reschedule
-        scheduleTimer(forView: view, duration: remaining)
-    }
-
-    // ─── View builder ─────────────────────────────────────────────────────────
-
-    private func buildToastView(type: String, title: String, subtitle: String,
-                                color: UIColor?, icon: String, iconColor: UIColor,
-                                maxWidth: CGFloat) -> UIView {
-        let bgColor: UIColor = color ?? {
-            switch type {
-            case "success": return UIColor(red: 24/255, green: 169/255, blue: 87/255, alpha: 1)
-            case "error":   return UIColor(red: 251/255, green: 44/255, blue: 54/255, alpha: 1)
-            case "info":    return UIColor(red: 150/255, green: 150/255, blue: 150/255, alpha: 1)
-            default:        return UIColor(red: 248/255, green: 182/255, blue: 50/255, alpha: 1)
-            }
-        }()
-        let container = UIView()
-        container.backgroundColor = bgColor
-        container.layer.cornerRadius = 16
-        container.layer.masksToBounds = false
-        container.layer.shadowColor = UIColor.black.cgColor
-        container.layer.shadowOpacity = 0.10
-        container.layer.shadowRadius = 4
-        container.layer.shadowOffset = CGSize(width: 0, height: 1)
-
-        let textStack = UIStackView()
-        textStack.axis = .vertical
-        textStack.alignment = .fill
-        textStack.spacing = 0
-
-        if !title.isEmpty {
-            let titleLabel = UILabel()
-            titleLabel.text = title
-            titleLabel.textColor = .white
-            titleLabel.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
-            titleLabel.numberOfLines = 0
-            titleLabel.setContentCompressionResistancePriority(.required, for: .vertical)
-            textStack.addArrangedSubview(titleLabel)
-        }
-        if !subtitle.isEmpty {
-            let subtitleLabel = UILabel()
-            subtitleLabel.text = subtitle
-            subtitleLabel.textColor = .white
-            subtitleLabel.font = UIFont.systemFont(ofSize: 13, weight: .regular)
-            subtitleLabel.numberOfLines = 0
-            textStack.addArrangedSubview(subtitleLabel)
-        }
-
-        let stackView = UIStackView()
-        stackView.axis = .horizontal
-        stackView.alignment = .center
-        stackView.spacing = 12
-        stackView.translatesAutoresizingMaskIntoConstraints = false
-        stackView.isLayoutMarginsRelativeArrangement = true
-        stackView.directionalLayoutMargins = NSDirectionalEdgeInsets(
-            top: 12,
-            leading: 16,
-            bottom: 12,
-            trailing: 16
-        )
-        container.addSubview(stackView)
-
-        var constraints: [NSLayoutConstraint] = [
-            stackView.topAnchor.constraint(equalTo: container.topAnchor),
-            stackView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            stackView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            stackView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
-        ]
-
-        if let iconView = makeIconView(icon: icon, iconColor: iconColor, glyphColor: bgColor) {
-            stackView.addArrangedSubview(iconView)
-            constraints.append(contentsOf: [
-                iconView.widthAnchor.constraint(equalToConstant: 24),
-                iconView.heightAnchor.constraint(equalToConstant: 24),
-            ])
-        }
-        stackView.addArrangedSubview(textStack)
-
-        NSLayoutConstraint.activate(constraints)
-        container.widthAnchor.constraint(equalToConstant: maxWidth).isActive = true
-        return container
-    }
-
-    private func makeIconView(icon: String, iconColor: UIColor, glyphColor: UIColor) -> UIView? {
-        guard icon != "none" else { return nil }
-        let iconView = ToastIconView(type: icon, iconColor: iconColor, glyphColor: glyphColor)
-        iconView.translatesAutoresizingMaskIntoConstraints = false
-        return iconView
+        // After a touch (hold or cancelled swipe) the toast stays long enough
+        // that letting go never looks like it dismissed the toast.
+        scheduleTimer(forView: view, duration: max(remaining, resumeGrace))
     }
 
     // ─── Enter / exit animations ─────────────────────────────────────────────
 
     private func animateIn(view: UIView, position: String) {
-        let offset = animationOffset(for: view, position: position)
-        view.transform = CGAffineTransform(translationX: 0, y: offset)
         view.alpha = 0
-        UIView.animate(
-            withDuration: toastAnimationDuration,
-            delay: 0,
-            options: [.curveEaseOut, .allowUserInteraction],
-            animations: {
-                view.transform = .identity
+        if UIAccessibility.isReduceMotionEnabled {
+            UIViewPropertyAnimator(duration: reducedMotionDuration, curve: .linear) {
                 view.alpha = 1
-            }
-        )
+            }.startAnimation()
+            return
+        }
+        // Slide in from the toast's own height plus the gap, from its edge.
+        let distance = view.bounds.height + toastGap
+        let offset = edge(of: position) == "top" ? -distance : distance
+        view.transform = CGAffineTransform(translationX: 0, y: offset)
+        UIViewPropertyAnimator(
+            duration: enterDuration, controlPoint1: enterCurve.0, controlPoint2: enterCurve.1
+        ) {
+            view.transform = .identity
+            view.alpha = 1
+        }.startAnimation()
     }
 
-    private func animateOut(view: UIView, position: String, completion: @escaping () -> Void) {
-        // Additive: animate from the current transform (possibly mid-drag)
-        // and add the slide delta on top, so the visible slide distance stays
-        // consistent regardless of how far the user dragged. Without this, a
-        // dragged-then-released toast only travels the tiny remaining gap and
-        // looks like a stutter instead of a smooth continuation off-screen.
-        let offset = animationOffset(for: view, position: position)
-        let targetY = view.transform.ty + offset
-        UIView.animate(
-            withDuration: toastAnimationDuration,
-            delay: 0,
-            options: [.curveEaseIn, .allowUserInteraction],
-            animations: {
-                view.transform = CGAffineTransform(translationX: 0, y: targetY)
+    // Slides out toward the dismiss direction, starting from wherever the toast
+    // currently is (possibly mid-drag). `velocity` is the finger's release
+    // velocity for a swipe; nil for a timed or programmatic dismissal.
+    private func animateOut(view: UIView, dismissDirection: String, velocity: CGFloat?,
+                            completion: @escaping () -> Void) {
+        if UIAccessibility.isReduceMotionEnabled {
+            let fade = UIViewPropertyAnimator(duration: reducedMotionDuration, curve: .linear) {
                 view.alpha = 0
-            },
-            completion: { _ in completion() }
-        )
-    }
-
-    private func animationOffset(for view: UIView, position: String) -> CGFloat {
-        guard let superview = view.superview else {
-            return position == "top" ? -view.bounds.height : view.bounds.height
+            }
+            fade.addCompletion { _ in completion() }
+            fade.startAnimation()
+            return
         }
 
-        if position == "top" {
-            return -(view.frame.maxY + toastAnimationOvershoot)
+        let distance = view.bounds.height + toastGap
+        let delta = dismissDirection == "up" ? -distance : distance
+        let target = CGAffineTransform(translationX: 0, y: view.transform.ty + delta)
+
+        if let velocity = velocity {
+            // Continue from the finger's speed instead of restarting from rest.
+            UIView.animate(
+                withDuration: exitDuration + 0.05, delay: 0,
+                usingSpringWithDamping: 1,
+                initialSpringVelocity: min(abs(velocity) / distance, 30),
+                options: [.beginFromCurrentState],
+                animations: {
+                    view.transform = target
+                    view.alpha = 0
+                },
+                completion: { _ in completion() }
+            )
+            return
         }
-        return superview.bounds.height - view.frame.minY + toastAnimationOvershoot
+
+        let slide = UIViewPropertyAnimator(
+            duration: exitDuration, controlPoint1: exitCurve.0, controlPoint2: exitCurve.1
+        ) {
+            view.transform = target
+        }
+        slide.addCompletion { _ in completion() }
+        slide.startAnimation()
+        UIViewPropertyAnimator(duration: exitFadeDuration, curve: .linear) {
+            view.alpha = 0
+        }.startAnimation()
     }
 
     // ─── Dismiss ─────────────────────────────────────────────────────────────
 
-    private func dismissToast(entry: ToastEntry) {
-        guard activeToasts.contains(where: { $0.containerView === entry.containerView }) else { return }
-        entry.dismissWorkItem?.cancel()
+    private func dismissToast(view: UIView, velocity: CGFloat? = nil) {
+        guard let idx = activeToasts.firstIndex(where: { $0.containerView === view }),
+              !activeToasts[idx].isDismissing else { return }
+        activeToasts[idx].dismissWorkItem?.cancel()
+        activeToasts[idx].dismissWorkItem = nil
+        activeToasts[idx].timerFireUptime = nil
+        activeToasts[idx].isDismissing = true
+        let dismissDirection = activeToasts[idx].dismissDirection
+
         // Lock out further touches so an active pan/hold can't keep writing
         // .transform mid-animation and fight the slide-off.
-        entry.containerView.isUserInteractionEnabled = false
-        animateOut(view: entry.containerView, position: entry.position) { [weak self] in
-            DispatchQueue.main.async {
-                guard let self = self else { return }
-                entry.containerView.removeFromSuperview()
-                self.activeToasts.removeAll { $0.containerView === entry.containerView }
-                self.rebuildOffsets()
-                if self.activeToasts.isEmpty {
-                    self.overlayWindow?.isHidden = true
-                }
+        view.isUserInteractionEnabled = false
+        // Neighbours close the gap while the toast leaves, not after.
+        layoutStack(animated: true)
+        animateOut(view: view, dismissDirection: dismissDirection, velocity: velocity) { [weak self] in
+            view.removeFromSuperview()
+            guard let self = self else { return }
+            self.activeToasts.removeAll { $0.containerView === view }
+            if self.activeToasts.isEmpty {
+                self.overlayWindow?.isHidden = true
             }
-        }
-    }
-
-    // ─── Stacking ─────────────────────────────────────────────────────────────
-
-    private func stackOffset(for position: String) -> CGFloat {
-        if position == "bottom" {
-            return 0
-        }
-        return activeToasts.filter { $0.position == position }
-            .reduce(0) { $0 + $1.containerView.frame.height + 8 }
-    }
-
-    private func rebuildOffsets() {
-        guard let scene = overlayWindow?.windowScene else { return }
-        let screenBounds = scene.coordinateSpace.bounds
-        let safeInsets = scene.windows.first(where: { $0.isKeyWindow })?.safeAreaInsets ?? .zero
-        let edgeMargin: CGFloat = 14
-        let topMargin = max(edgeMargin, safeInsets.top + 14)
-        let bottomMargin = max(edgeMargin, safeInsets.bottom + 14)
-
-        // Partition once instead of filtering twice.
-        var topToasts: [ToastEntry] = []
-        var bottomToasts: [ToastEntry] = []
-        topToasts.reserveCapacity(activeToasts.count)
-        bottomToasts.reserveCapacity(activeToasts.count)
-        for entry in activeToasts {
-            if entry.position == "top" {
-                topToasts.append(entry)
-            } else {
-                bottomToasts.append(entry)
-            }
-        }
-
-        var topOffset = topMargin
-        for e in topToasts {
-            reposition(e.containerView, toOriginY: topOffset)
-            topOffset += e.containerView.bounds.height + 8
-        }
-
-        var bottomOffset = bottomMargin
-        for e in bottomToasts.reversed() {
-            let targetY = screenBounds.height - bottomOffset - e.containerView.bounds.height
-            reposition(e.containerView, toOriginY: targetY)
-            bottomOffset += e.containerView.bounds.height + 8
-        }
-    }
-
-    // Animates the view's frame.origin.y so existing toasts smoothly slide into
-    // place when neighbours are added or removed — without this the bottom-stack
-    // would teleport upward whenever a new bottom toast arrives.
-    private func reposition(_ view: UIView, toOriginY targetY: CGFloat) {
-        if abs(view.frame.origin.y - targetY) < 0.5 { return }
-        var newFrame = view.frame
-        newFrame.origin.y = targetY
-        UIView.animate(
-            withDuration: toastAnimationDuration,
-            delay: 0,
-            options: [.curveEaseOut, .allowUserInteraction, .beginFromCurrentState]
-        ) {
-            view.frame = newFrame
         }
     }
 
@@ -417,7 +476,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         hold.delegate = self
         view.addGestureRecognizer(hold)
 
-        // Pan: visual drag + threshold dismiss or spring bounce-back.
+        // Pan: visual drag, then dismiss or spring back on release.
         let pan = UIPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
         pan.delegate = self
         view.addGestureRecognizer(pan)
@@ -430,57 +489,105 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
     ) -> Bool { true }
 
+    // Leave touches on the close button to the button itself.
+    public func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldReceive touch: UITouch
+    ) -> Bool { !(touch.view is UIControl) }
+
     // ─── Gesture handlers ─────────────────────────────────────────────────────
 
     @objc private func handleHold(_ recognizer: UILongPressGestureRecognizer) {
-        guard let view = recognizer.view else { return }
+        guard let view = recognizer.view as? ToastView else { return }
         switch recognizer.state {
         case .began:
             pauseTimer(forView: view)
+            view.setPressed(true)
         case .ended, .cancelled, .failed:
             resumeTimer(forView: view)
+            view.setPressed(false)
         default:
             break
         }
     }
 
     @objc private func handlePan(_ recognizer: UIPanGestureRecognizer) {
-        guard let view = recognizer.view,
-              let entry = activeToasts.first(where: { $0.containerView === view })
+        guard let view = recognizer.view as? ToastView,
+              let entry = activeToasts.first(where: { $0.containerView === view }),
+              !entry.isDismissing
         else { return }
-        let direction = entry.dismissDirection
-        let superview = entry.containerView.superview
+        // +1 when the toast dismisses downward, -1 upward.
+        let sign: CGFloat = entry.dismissDirection == "up" ? -1 : 1
 
         switch recognizer.state {
+        case .began:
+            // Grab the toast wherever it is on screen, even mid spring-back.
+            let current = view.layer.presentation()?.affineTransform().ty ?? view.transform.ty
+            view.removeTransformAnimations()
+            view.transform = CGAffineTransform(translationX: 0, y: current)
+            view.panStartRaw = current * sign >= 0 ? current : current / rubberBand
+            view.isArmed = false
+
         case .changed:
-            let dy = recognizer.translation(in: superview).y
-            // Clamp to dismiss direction — resists dragging the wrong way.
-            let clamped: CGFloat = direction == "up" ? min(dy, 0) : max(dy, 0)
-            entry.containerView.transform = CGAffineTransform(translationX: 0, y: clamped)
+            let raw = view.panStartRaw + recognizer.translation(in: view.superview).y
+            // Free movement toward the dismiss edge, rubber-band the other way.
+            let offset = raw * sign >= 0 ? raw : raw * rubberBand
+            view.transform = CGAffineTransform(translationX: 0, y: offset)
+            // Fade toward armedAlpha as the drag nears the threshold, so the
+            // user can see whether letting go will dismiss.
+            let progress = min(max(offset * sign / dismissThreshold, 0), 1)
+            view.alpha = 1 - (1 - armedAlpha) * progress
+
+            let nowArmed = offset * sign > dismissThreshold
+            if nowArmed && !view.isArmed {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            }
+            view.isArmed = nowArmed
 
         case .ended:
-            let translation = recognizer.translation(in: superview).y
-            let shouldDismiss: Bool = direction == "up"
-                ? translation < -toastDismissThreshold
-                : translation >  toastDismissThreshold
-
-            if shouldDismiss {
-                dismissToast(entry: entry)
+            let velocity = recognizer.velocity(in: view.superview).y
+            let toward = view.transform.ty * sign
+            let towardVelocity = velocity * sign
+            // Release direction wins over distance: a flick toward the edge
+            // dismisses, moving back toward rest cancels.
+            let shouldDismiss: Bool
+            if towardVelocity > flickVelocity && toward > 0 {
+                shouldDismiss = true
+            } else if towardVelocity < -reverseVelocity {
+                shouldDismiss = false
             } else {
-                UIView.animate(
-                    withDuration: 0.4, delay: 0,
-                    usingSpringWithDamping: 0.6, initialSpringVelocity: 0.8,
-                    options: [.curveEaseOut]
-                ) { entry.containerView.transform = .identity }
+                shouldDismiss = toward > dismissThreshold
+            }
+            view.isArmed = false
+            if shouldDismiss {
+                dismissToast(view: view, velocity: velocity)
+            } else {
+                springBack(view, velocity: velocity)
             }
 
         case .cancelled:
-            UIView.animate(withDuration: 0.3, delay: 0, options: [.curveEaseOut]) {
-                entry.containerView.transform = .identity
-            }
+            view.isArmed = false
+            springBack(view, velocity: 0)
 
         default:
             break
+        }
+    }
+
+    // Returns a cancelled drag to rest, starting from the finger's velocity.
+    // .allowUserInteraction keeps the toast grabbable while it settles.
+    private func springBack(_ view: UIView, velocity: CGFloat) {
+        let offset = view.transform.ty
+        let normalizedVelocity: CGFloat = abs(offset) > 0.5
+            ? min(max(velocity / -offset, -30), 30) : 0
+        UIView.animate(
+            withDuration: 0.4, delay: 0,
+            usingSpringWithDamping: settleDamping,
+            initialSpringVelocity: normalizedVelocity,
+            options: [.allowUserInteraction, .beginFromCurrentState]
+        ) {
+            view.transform = .identity
+            view.alpha = 1
         }
     }
 
@@ -493,86 +600,507 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     }
 }
 
-// ─── Toast icon ───────────────────────────────────────────────────────────────
+// ─── Toast view ───────────────────────────────────────────────────────────────
 
-private class ToastIconView: UIView {
-    private let type: String
-    private let iconColor: UIColor
-    private let glyphColor: UIColor
+// The outer view carries position, drag translation and opacity. The inner
+// `card` carries the background, shadow and press scale, so the two transforms
+// never interfere.
+private final class ToastView: UIView {
+    private let card = UIView()
+    private let contentStack = UIStackView()
+    private var widthConstraint: NSLayoutConstraint!
+    private weak var iconView: ToastIconView?
 
-    init(type: String, iconColor: UIColor, glyphColor: UIColor) {
-        self.type = type
-        self.iconColor = iconColor
-        self.glyphColor = glyphColor
+    var onClose: (() -> Void)?
+    // Drag bookkeeping, owned by the pan handler.
+    var panStartRaw: CGFloat = 0
+    var isArmed = false
+
+    private(set) var spokenText = ""
+
+    init(payload: NativeToastPayload) {
         super.init(frame: .zero)
-        backgroundColor = .clear
-        isOpaque = false
+
+        card.layer.cornerRadius = 16
+        card.layer.masksToBounds = false
+        card.layer.shadowColor = UIColor.black.cgColor
+        card.layer.shadowOpacity = 0.10
+        card.layer.shadowRadius = 4
+        card.layer.shadowOffset = CGSize(width: 0, height: 1)
+        addSubview(card)
+
+        // Toast content metrics are kept in sync with the Android renderer.
+        contentStack.axis = .horizontal
+        contentStack.alignment = .center
+        contentStack.spacing = 12
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.isLayoutMarginsRelativeArrangement = true
+        contentStack.directionalLayoutMargins = NSDirectionalEdgeInsets(
+            top: 12, leading: 16, bottom: 12, trailing: 16
+        )
+        card.addSubview(contentStack)
+
+        widthConstraint = card.widthAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([
+            contentStack.topAnchor.constraint(equalTo: card.topAnchor),
+            contentStack.leadingAnchor.constraint(equalTo: card.leadingAnchor),
+            contentStack.trailingAnchor.constraint(equalTo: card.trailingAnchor),
+            contentStack.bottomAnchor.constraint(equalTo: card.bottomAnchor),
+            widthConstraint,
+        ])
+
+        configure(with: payload)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
+    func configure(with payload: NativeToastPayload) {
+        for subview in contentStack.arrangedSubviews {
+            contentStack.removeArrangedSubview(subview)
+            subview.removeFromSuperview()
+        }
+
+        let background = payload.resolvedBackgroundColor
+        let textColor = payload.resolvedTextColor
+        card.backgroundColor = background
+
+        if payload.icon != "none" {
+            let iconView = ToastIconView(
+                type: payload.icon, iconColor: payload.resolvedIconColor, glyphColor: background
+            )
+            iconView.translatesAutoresizingMaskIntoConstraints = false
+            self.iconView = iconView
+            contentStack.addArrangedSubview(iconView)
+            NSLayoutConstraint.activate([
+                iconView.widthAnchor.constraint(equalToConstant: 24),
+                iconView.heightAnchor.constraint(equalToConstant: 24),
+            ])
+        }
+
+        let textStack = UIStackView()
+        textStack.axis = .vertical
+        textStack.alignment = .fill
+        textStack.spacing = 0
+        if !payload.title.isEmpty {
+            let titleLabel = makeLabel(
+                text: payload.title, color: textColor, lines: 2,
+                font: UIFont.systemFont(ofSize: 14, weight: .semibold), style: .subheadline
+            )
+            titleLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+            textStack.addArrangedSubview(titleLabel)
+        }
+        if !payload.subtitle.isEmpty {
+            textStack.addArrangedSubview(makeLabel(
+                text: payload.subtitle, color: textColor, lines: 3,
+                font: UIFont.systemFont(ofSize: 13, weight: .regular), style: .footnote
+            ))
+        }
+        contentStack.addArrangedSubview(textStack)
+
+        if payload.closeButton {
+            let closeButton = ToastCloseButton(color: textColor)
+            closeButton.translatesAutoresizingMaskIntoConstraints = false
+            closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+            contentStack.addArrangedSubview(closeButton)
+            NSLayoutConstraint.activate([
+                closeButton.widthAnchor.constraint(equalToConstant: 24),
+                closeButton.heightAnchor.constraint(equalToConstant: 24),
+            ])
+        }
+
+        spokenText = [payload.title, payload.subtitle].filter { !$0.isEmpty }.joined(separator: ", ")
+        if payload.closeButton {
+            // Labels and the close button are reached individually.
+            isAccessibilityElement = false
+            accessibilityCustomActions = nil
+        } else {
+            // One element with a dismiss action, so VoiceOver users never
+            // depend on the swipe gesture.
+            isAccessibilityElement = true
+            accessibilityLabel = spokenText
+            accessibilityTraits = .staticText
+            accessibilityCustomActions = [UIAccessibilityCustomAction(
+                name: "Dismiss", target: self, selector: #selector(accessibilityDismiss)
+            )]
+        }
+    }
+
+    // Fonts keep their designed size at the default setting and scale with
+    // Dynamic Type from there.
+    private func makeLabel(text: String, color: UIColor, lines: Int,
+                           font: UIFont, style: UIFont.TextStyle) -> UILabel {
+        let label = UILabel()
+        label.text = text
+        label.textColor = color
+        label.font = UIFontMetrics(forTextStyle: style).scaledFont(for: font)
+        label.adjustsFontForContentSizeCategory = true
+        label.numberOfLines = lines
+        label.lineBreakMode = .byTruncatingTail
+        return label
+    }
+
+    func fittingHeight(forWidth width: CGFloat) -> CGFloat {
+        widthConstraint.constant = width
+        return card.systemLayoutSizeFitting(
+            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        ).height
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // bounds/center rather than frame: the card may be scaled while pressed.
+        card.bounds = bounds
+        card.center = CGPoint(x: bounds.midX, y: bounds.midY)
+        // An explicit path lets Core Animation skip the offscreen pass it would
+        // otherwise need to derive the shadow shape on every animated frame.
+        card.layer.shadowPath = UIBezierPath(
+            roundedRect: card.bounds, cornerRadius: card.layer.cornerRadius
+        ).cgPath
+    }
+
+    func playIconEntrance() {
+        iconView?.playEntrance()
+    }
+
+    // Slight scale-down while held, showing that the timer is paused.
+    func setPressed(_ pressed: Bool) {
+        UIView.animate(
+            withDuration: pressed ? 0.12 : 0.18, delay: 0,
+            options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseOut]
+        ) {
+            self.card.transform = pressed
+                ? CGAffineTransform(scaleX: 0.98, y: 0.98) : .identity
+        }
+    }
+
+    // Stops in-flight translation animations so a new drag owns the transform.
+    func removeTransformAnimations() {
+        for key in layer.animationKeys() ?? [] {
+            if let animation = layer.animation(forKey: key) as? CAPropertyAnimation,
+               animation.keyPath == "transform" {
+                layer.removeAnimation(forKey: key)
+            }
+        }
+    }
+
+    @objc private func closeTapped() {
+        onClose?()
+    }
+
+    @objc private func accessibilityDismiss() -> Bool {
+        onClose?()
+        return true
+    }
+}
+
+// ─── Close button ─────────────────────────────────────────────────────────────
+
+private final class ToastCloseButton: UIControl {
+    private let color: UIColor
+
+    init(color: UIColor) {
+        self.color = color
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        isOpaque = false
+        isAccessibilityElement = true
+        accessibilityLabel = "Dismiss"
+        accessibilityTraits = .button
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    // Drawn at 24pt to match the icon, but the touch target is 40pt.
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        bounds.insetBy(dx: -8, dy: -8).contains(point)
+    }
+
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         let s = min(rect.width, rect.height) / 24
-        context.saveGState()
-        context.translateBy(x: rect.minX, y: rect.minY)
         context.scaleBy(x: s, y: s)
+        context.setStrokeColor(color.cgColor)
+        context.setLineWidth(1.75)
+        context.setLineCap(.round)
+        context.move(to: CGPoint(x: 7.5, y: 7.5))
+        context.addLine(to: CGPoint(x: 16.5, y: 16.5))
+        context.move(to: CGPoint(x: 16.5, y: 7.5))
+        context.addLine(to: CGPoint(x: 7.5, y: 16.5))
+        context.strokePath()
+    }
+}
 
-        if type == "info" {
-            context.setFillColor(iconColor.cgColor)
-            context.addPath(ToastIconView.wifiFillPath.cgPath)
-            context.fillPath()
-            context.setStrokeColor(iconColor.cgColor)
-            context.setLineWidth(1.3301)
-            context.setLineCap(.round)
-            context.move(to: CGPoint(x: 4.23901, y: 4.16736))
-            context.addLine(to: CGPoint(x: 18.4817, y: 18.4104))
-            context.strokePath()
-            context.addArc(center: CGPoint(x: 12.041, y: 18.8081), radius: 1.27515,
-                           startAngle: 0, endAngle: .pi * 2, clockwise: false)
-            context.fillPath()
-            context.restoreGState()
+// ─── Toast icon ───────────────────────────────────────────────────────────────
+
+// ─── Icon motion ──────────────────────────────────────────────────────────────
+// Every icon shares one entrance (a springy pop of the badge), then plays a
+// motion that fits its meaning:
+//   success — the check draws left to right, then the badge bounces
+//   error   — the cross bursts out from its centre, then the badge shakes
+//   warning — the "!" drops in and its dot pops, then the badge wobbles
+//   info    — the dot pops, the stem grows down, then one soft pulse
+//   offline — the slash strikes through the WiFi symbol
+// Everything is a pure function of elapsed milliseconds, so the Android
+// renderer uses exactly the same numbers.
+private enum IconMotion {
+    static let totalMs: Double = 1000
+
+    static func seg(_ ms: Double, _ start: Double, _ end: Double) -> Double {
+        min(max((ms - start) / (end - start), 0), 1)
+    }
+
+    static func easeOutCubic(_ x: Double) -> Double {
+        let inv = 1 - x
+        return 1 - inv * inv * inv
+    }
+
+    // Overshoots past 1 before settling, like a light spring.
+    static func easeOutBack(_ x: Double) -> Double {
+        let c1 = 1.70158
+        let c3 = c1 + 1
+        let d = x - 1
+        return 1 + c3 * d * d * d + c1 * d * d
+    }
+
+    // 0 → 1 → 0.
+    static func bump(_ x: Double) -> Double { sin(.pi * x) }
+
+    // A wave that fades to rest: used for the shake and the wobble.
+    static func decayingWave(_ x: Double, cycles: Double) -> Double {
+        (1 - x) * sin(x * cycles * 2 * .pi)
+    }
+
+    static func kind(for type: String) -> String {
+        switch type {
+        case "success", "error", "warning", "offline": return type
+        default: return "info"
+        }
+    }
+
+    static func alpha(_ ms: Double) -> Double { seg(ms, 80, 200) }
+
+    static func scale(_ kind: String, _ ms: Double) -> Double {
+        let pop = 0.5 + 0.5 * easeOutBack(seg(ms, 80, 380))
+        let accent: Double
+        switch kind {
+        case "success": accent = 1 + 0.18 * bump(seg(ms, 430, 730))
+        case "info":    accent = 1 + 0.10 * bump(seg(ms, 520, 820))
+        default:        accent = 1
+        }
+        return pop * accent
+    }
+
+    // Horizontal shake in 24-unit icon space.
+    static func shake(_ kind: String, _ ms: Double) -> Double {
+        kind == "error" ? 3 * decayingWave(seg(ms, 380, 780), cycles: 3) : 0
+    }
+
+    // Wobble in degrees.
+    static func tilt(_ kind: String, _ ms: Double) -> Double {
+        kind == "warning" ? 14 * decayingWave(seg(ms, 430, 930), cycles: 2.5) : 0
+    }
+}
+
+// All icons are built from shape layers in a 24-unit canvas that is scaled to
+// the view, so each part of the glyph can be animated on its own.
+private class ToastIconView: UIView {
+    private let kind: String
+    private let iconColor: UIColor
+    private let glyphColor: UIColor
+
+    // Carries the whole-badge motion (pop, bounce, shake, wobble).
+    private let effects = CALayer()
+    private let canvas = CALayer()
+    // Strokes that draw themselves on.
+    private var strokeLayers: [CAShapeLayer] = []
+    // The stem of "!", which drops in instead of drawing.
+    private var dropLayer: CAShapeLayer?
+    // The dot of "!" / "i".
+    private var dotLayer: CAShapeLayer?
+
+    init(type: String, iconColor: UIColor, glyphColor: UIColor) {
+        self.kind = IconMotion.kind(for: type)
+        self.iconColor = iconColor
+        self.glyphColor = glyphColor
+        super.init(frame: .zero)
+        backgroundColor = .clear
+        isOpaque = false
+        isUserInteractionEnabled = false
+        canvas.bounds = CGRect(x: 0, y: 0, width: 24, height: 24)
+        layer.addSublayer(effects)
+        effects.addSublayer(canvas)
+        buildShapes()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let s = min(bounds.width, bounds.height) / 24
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        effects.bounds = bounds
+        effects.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        canvas.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        canvas.setAffineTransform(CGAffineTransform(scaleX: s, y: s))
+        CATransaction.commit()
+    }
+
+    // ─── Shapes ───────────────────────────────────────────────────────────────
+
+    private func buildShapes() {
+        if kind == "offline" {
+            addFill(ToastIconView.wifiFillPath, color: iconColor)
+            addFill(circlePath(center: CGPoint(x: 12.041, y: 18.8081), radius: 1.27515),
+                    color: iconColor)
+            strokeLayers.append(addStroke(
+                linePath([CGPoint(x: 4.23901, y: 4.16736), CGPoint(x: 18.4817, y: 18.4104)]),
+                color: iconColor, width: 1.3301
+            ))
             return
         }
 
-        context.setFillColor(iconColor.cgColor)
-        context.setStrokeColor(iconColor.cgColor)
-        context.setLineWidth(1.5)
-        context.addArc(center: CGPoint(x: 12, y: 12), radius: 10, startAngle: 0, endAngle: .pi * 2, clockwise: false)
-        context.drawPath(using: .fillStroke)
+        addFill(circlePath(center: CGPoint(x: 12, y: 12), radius: 10.75), color: iconColor)
 
-        context.setStrokeColor(glyphColor.cgColor)
-        context.setLineWidth(1.5)
-        context.setLineCap(.round)
-        context.setLineJoin(.round)
-
-        switch type {
+        switch kind {
         case "success":
-            context.move(to: CGPoint(x: 8.5, y: 12.5))
-            context.addLine(to: CGPoint(x: 10.5, y: 14.5))
-            context.addLine(to: CGPoint(x: 15.5, y: 9.5))
-            context.strokePath()
+            strokeLayers.append(addStroke(linePath([
+                CGPoint(x: 8.5, y: 12.5), CGPoint(x: 10.5, y: 14.5), CGPoint(x: 15.5, y: 9.5),
+            ]), color: glyphColor))
         case "error":
-            context.move(to: CGPoint(x: 14.5, y: 9.5))
-            context.addLine(to: CGPoint(x: 9.5, y: 14.5))
-            context.strokePath()
-            context.move(to: CGPoint(x: 9.5, y: 9.5))
-            context.addLine(to: CGPoint(x: 14.5, y: 14.5))
-            context.strokePath()
+            // Four arms from the centre, so they can burst out together.
+            let center = CGPoint(x: 12, y: 12)
+            for tip in [CGPoint(x: 14.5, y: 9.5), CGPoint(x: 9.5, y: 14.5),
+                        CGPoint(x: 9.5, y: 9.5), CGPoint(x: 14.5, y: 14.5)] {
+                strokeLayers.append(addStroke(linePath([center, tip]), color: glyphColor))
+            }
+        case "warning":
+            dropLayer = addStroke(
+                linePath([CGPoint(x: 12, y: 7.5), CGPoint(x: 12, y: 13)]), color: glyphColor
+            )
+            addDot(center: CGPoint(x: 12, y: 16.25))
         default:
-            context.move(to: CGPoint(x: 12, y: 17))
-            context.addLine(to: CGPoint(x: 12, y: 11))
-            context.strokePath()
-            context.setFillColor(iconColor.cgColor)
-            context.setStrokeColor(glyphColor.cgColor)
-            context.setLineWidth(1)
-            context.addArc(center: CGPoint(x: 12, y: 8), radius: 0.5, startAngle: 0, endAngle: .pi * 2, clockwise: false)
-            context.drawPath(using: .fillStroke)
+            addDot(center: CGPoint(x: 12, y: 7.75))
+            strokeLayers.append(addStroke(
+                linePath([CGPoint(x: 12, y: 11), CGPoint(x: 12, y: 16.5)]), color: glyphColor
+            ))
+        }
+    }
+
+    private func circlePath(center: CGPoint, radius: CGFloat) -> UIBezierPath {
+        UIBezierPath(ovalIn: CGRect(x: center.x - radius, y: center.y - radius,
+                                    width: radius * 2, height: radius * 2))
+    }
+
+    private func linePath(_ points: [CGPoint]) -> UIBezierPath {
+        let path = UIBezierPath()
+        path.move(to: points[0])
+        for point in points.dropFirst() { path.addLine(to: point) }
+        return path
+    }
+
+    private func addFill(_ path: UIBezierPath, color: UIColor) {
+        let shape = CAShapeLayer()
+        shape.path = path.cgPath
+        shape.fillColor = color.cgColor
+        canvas.addSublayer(shape)
+    }
+
+    @discardableResult
+    private func addStroke(_ path: UIBezierPath, color: UIColor, width: CGFloat = 1.5) -> CAShapeLayer {
+        let shape = CAShapeLayer()
+        shape.path = path.cgPath
+        shape.fillColor = nil
+        shape.strokeColor = color.cgColor
+        shape.lineWidth = width
+        shape.lineCap = .round
+        shape.lineJoin = .round
+        canvas.addSublayer(shape)
+        return shape
+    }
+
+    // The dot gets its own bounds so it can scale around its centre.
+    private func addDot(center: CGPoint) {
+        let shape = CAShapeLayer()
+        shape.bounds = CGRect(x: 0, y: 0, width: 2, height: 2)
+        shape.position = center
+        shape.path = UIBezierPath(ovalIn: shape.bounds).cgPath
+        shape.fillColor = glyphColor.cgColor
+        canvas.addSublayer(shape)
+        dotLayer = shape
+    }
+
+    // ─── Entrance ─────────────────────────────────────────────────────────────
+
+    func playEntrance() {
+        guard !UIAccessibility.isReduceMotionEnabled else { return }
+        typealias M = IconMotion
+        let kind = self.kind
+        let unit = Double(min(bounds.width, bounds.height) / 24)   // points per icon unit
+
+        // Whole badge.
+        animate(effects, "opacity") { M.alpha($0) }
+        animate(effects, "transform.scale") { M.scale(kind, $0) }
+        if kind == "error" {
+            animate(effects, "transform.translation.x") { M.shake(kind, $0) * (unit > 0 ? unit : 1) }
+        }
+        if kind == "warning" {
+            animate(effects, "transform.rotation.z") { M.tilt(kind, $0) * .pi / 180 }
         }
 
-        context.restoreGState()
+        // Glyph parts.
+        switch kind {
+        case "success":
+            for stroke in strokeLayers {
+                animate(stroke, "strokeEnd") { M.easeOutCubic(M.seg($0, 200, 480)) }
+            }
+        case "error":
+            for stroke in strokeLayers {
+                animate(stroke, "strokeEnd") { M.easeOutCubic(M.seg($0, 200, 400)) }
+            }
+        case "warning":
+            if let stem = dropLayer {
+                animate(stem, "transform.translation.y") {
+                    -6 * (1 - M.easeOutBack(M.seg($0, 200, 450)))
+                }
+                animate(stem, "opacity") { M.seg($0, 200, 300) }
+            }
+            if let dot = dotLayer {
+                animate(dot, "transform.scale") { max(M.easeOutBack(M.seg($0, 400, 560)), 0) }
+            }
+        case "offline":
+            for stroke in strokeLayers {
+                animate(stroke, "strokeEnd") { M.easeOutCubic(M.seg($0, 200, 580)) }
+            }
+        default:
+            if let dot = dotLayer {
+                animate(dot, "transform.scale") { max(M.easeOutBack(M.seg($0, 200, 360)), 0) }
+            }
+            for stroke in strokeLayers {
+                animate(stroke, "strokeEnd") { M.easeOutCubic(M.seg($0, 300, 520)) }
+            }
+        }
+    }
+
+    // Samples `value(ms)` across the whole motion at 60 fps. Every function
+    // ends on the layer's resting value, so nothing jumps when it finishes.
+    private func animate(_ target: CALayer, _ keyPath: String, _ value: (Double) -> Double) {
+        let frames = Int(IconMotion.totalMs / 1000 * 60)
+        let animation = CAKeyframeAnimation(keyPath: keyPath)
+        animation.values = (0...frames).map { frame in
+            value(Double(frame) / Double(frames) * IconMotion.totalMs)
+        }
+        animation.duration = IconMotion.totalMs / 1000
+        animation.calculationMode = .linear
+        target.add(animation, forKey: "entrance." + keyPath)
     }
 
     private static let wifiFillPath: UIBezierPath = {
@@ -634,8 +1162,25 @@ private class PassthroughViewController: UIViewController {
 }
 
 private class PassthroughView: UIView {
+    // Called when the view's size or safe area changes (rotation, split view).
+    var onGeometryChange: (() -> Void)?
+    private var lastSize: CGSize = .zero
+
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         let hit = super.hitTest(point, with: event)
         return hit === self ? nil : hit
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if bounds.size != lastSize {
+            lastSize = bounds.size
+            onGeometryChange?()
+        }
+    }
+
+    override func safeAreaInsetsDidChange() {
+        super.safeAreaInsetsDidChange()
+        onGeometryChange?()
     }
 }

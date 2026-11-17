@@ -21,7 +21,7 @@ Touches outside the toast pass through to the Flutter app, so the page remains u
 
 ```yaml
 dependencies:
-  toast_native_dev: ^0.0.11
+  toast_native_dev: ^0.1.0
 ```
 
 ```dart
@@ -42,10 +42,13 @@ Default behavior:
 | Option | Default |
 |---|---|
 | Position | `ToastPosition.top` |
-| Duration | `NativeToastLength.short` - 2 seconds |
+| Duration | 4 seconds; 6 seconds for `ToastType.error` |
 | Background | Based on `ToastType` |
-| Icon | Based on `ToastType` |
+| Text color | White or near-black, whichever contrasts more with the background |
+| Icon | Based on `ToastType`, white on every type |
+| Icon animation | On: each icon type plays its own entrance motion |
 | Dismiss direction | `up` for top, `down` for bottom |
+| Close button | Shown only for `NativeToastLength.never` |
 
 ## Custom Toast
 
@@ -66,7 +69,7 @@ await showToast(
 ### `showToast`
 
 ```dart
-Future<void> showToast({
+Future<String?> showToast({
   required ToastType type,
   String? title,
   String? subtitle,
@@ -74,28 +77,59 @@ Future<void> showToast({
 })
 ```
 
-`title` and `subtitle` are optional. A null or blank value is not drawn. If both are missing, `showToast` does nothing.
+`title` and `subtitle` are optional. A null or blank value is not drawn. The title is limited to 2 lines and the subtitle to 3. If both are missing, `showToast` does nothing and returns `null`.
 
-The returned `Future<void>` completes after the native platform receives the request. It does not wait until the toast disappears.
+The future completes after the native platform receives the request; it does not wait until the toast disappears. It returns the toast id, which is the `key` option when one is set.
+
+### `dismissToast` and `dismissAllToasts`
+
+```dart
+final id = await showToast(
+  type: ToastType.info,
+  title: 'Uploading',
+  options: const NativeToastOptions(length: NativeToastLength.never),
+);
+await dismissToast(id!);
+
+await dismissAllToasts();
+```
+
+### `setToastDefaults`
+
+Sets app-wide defaults once, so individual calls do not repeat them.
+
+```dart
+setToastDefaults(const NativeToastDefaults(
+  position: ToastPosition.bottom,
+  length: NativeToastLength.long,
+  colors: {ToastType.success: Color(0xff0B5FFF)},
+));
+```
 
 ### `ToastType`
 
 | Value | Default color | Default icon |
 |---|---:|---|
-| `ToastType.success` | `0xff18A957` | Check circle |
-| `ToastType.error` | `0xffFB2C36` | Close circle |
-| `ToastType.warning` | `0xffF8B632` | Info circle |
-| `ToastType.info` | `0xff969696` | WiFi disconnect |
+| `ToastType.success` | `0xff0E7A3E` | Check circle |
+| `ToastType.error` | `0xffD11A2A` | Close circle |
+| `ToastType.warning` | `0xffF8B632` (dark text) | Exclamation circle |
+| `ToastType.info` | `0xff2B2B2F` | Info circle |
+
+Every default reaches at least 4.5:1 contrast between text and background.
 
 ### `NativeToastOptions`
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `position` | `ToastPosition` | `ToastPosition.top` | Shows the toast at the top or bottom. |
-| `length` | `NativeToastLength` | `NativeToastLength.short` | Auto-dismiss duration. |
+| `position` | `ToastPosition?` | `ToastPosition.top` | Shows the toast at the top or bottom. |
+| `length` | `NativeToastLength?` | 4 s, 6 s for errors | Auto-dismiss duration. |
 | `bgColor` | `Color?` | Type color | Overrides the default background color. |
+| `textColor` | `Color?` | Best contrast | Title and subtitle color. |
 | `icon` | `NativeToastIcon?` | Type icon | Overrides or hides the icon. |
-| `dismissDirection` | `NativeToastDismissDirection?` | Based on position | Drag direction that dismisses the toast. |
+| `dismissDirection` | `NativeToastDismissDirection?` | Based on position | Drag direction that dismisses the toast. Timed exits slide the same way. |
+| `key` | `String?` | None | Showing a toast with a key that is already visible updates that toast instead of adding another. |
+| `showCloseButton` | `bool?` | `true` for `never` | Shows a close button. |
+| `animateIcon` | `bool?` | `true` | Plays the icon's entrance animation. Turn it off per toast here, or for the whole app with `setToastDefaults(const NativeToastDefaults(animateIcon: false))`. |
 
 ### `ToastPosition`
 
@@ -133,29 +167,52 @@ await showToast(
 |---|---|
 | `NativeToastIcon.success({color})` | Check circle. |
 | `NativeToastIcon.error({color})` | Close circle. |
-| `NativeToastIcon.warning({color})` | Info circle. |
-| `NativeToastIcon.info({color})` | WiFi disconnect. |
+| `NativeToastIcon.warning({color})` | Exclamation circle. |
+| `NativeToastIcon.info({color})` | Info circle. |
+| `NativeToastIcon.offline({color})` | WiFi disconnect. |
 | `NativeToastIcon.none` | Hides the icon. |
 
-Icons are drawn natively; no image assets are required.
+Icons are drawn natively; no image assets are required. When `color` is omitted the icon is white on every toast type.
+
+When a toast appears its icon badge pops in with a light spring, then plays a motion that fits its meaning:
+
+| Icon | Motion |
+|---|---|
+| Success | The check is drawn like a pen stroke, then the badge bounces. |
+| Error | The cross bursts out from its centre, then the badge shakes side to side. |
+| Warning | The "!" drops in and its dot pops, then the badge wobbles. |
+| Info | The dot pops, the stem grows down from it, then one soft pulse. |
+| Offline | The slash strikes through the WiFi symbol. |
+
+The whole motion takes one second and is identical on Android and iOS. Set `animateIcon: false` to show the icon immediately. It is skipped when Reduce Motion is on (iOS) or system animations are off (Android).
 
 ## Gestures
 
 | Gesture | Behavior |
 |---|---|
-| Drag in `dismissDirection` | Moves the toast with the finger. If dragged past the threshold, the toast dismisses. |
-| Drag opposite direction | Movement is clamped, so the toast resists the wrong direction. |
-| Touch and hold | Pauses the auto-dismiss timer. |
-| Release after hold | Resumes the remaining auto-dismiss duration. |
+| Drag in `dismissDirection` | Moves the toast with the finger and fades it as it nears the 56pt threshold, with a haptic tick on crossing. |
+| Release past the threshold | Dismisses, continuing at the finger's speed. |
+| Fast flick toward the edge | Dismisses even before the threshold. |
+| Release while moving back | Cancels: the toast springs back, even from past the threshold. |
+| Drag opposite direction | The toast follows with rubber-band resistance. |
+| Touch and hold | Pauses the auto-dismiss timer; the toast shrinks slightly. |
+| Release | Resumes the timer with at least 1.5 seconds left. |
+| Tap the close button | Dismisses (when shown). |
 
 ## Stacking
 
-Multiple toasts can be visible at the same time.
+- Any number of toasts can be visible at once; each one shows immediately.
+- Top toasts stack downward; bottom toasts stack upward with the newest closest to the edge.
+- Neighbours slide into place at the same moment a toast enters or leaves.
+- Toasts are at most 520pt wide and centered, respect all safe-area insets, and bottom toasts stay above the keyboard.
+- Taps outside a toast pass through to the app.
 
-- Top toasts stack downward.
-- Bottom toasts stack upward.
-- Removing a toast rebuilds the stack offsets.
-- Background taps pass through to Flutter on iOS.
+## Accessibility
+
+- Toasts are announced by VoiceOver and TalkBack when they appear and expose a "Dismiss" action.
+- Android applies the system "Time to take action" setting to the duration; iOS keeps timed toasts for at least 6 seconds while VoiceOver is running.
+- Text scales with Dynamic Type on iOS and the font scale on Android.
+- With Reduce Motion (iOS) toasts fade instead of sliding; Android follows the system animation scale.
 
 ## Platform Support
 
@@ -180,15 +237,21 @@ const MethodChannel('toast_native_dev/channel');
 
 | Argument | Type |
 |---|---|
+| `id` | `String`, unique per toast or the caller's `key` |
 | `type` | `success`, `warning`, `error`, or `info` |
 | `title` | `String` (empty when omitted) |
 | `subtitle` | `String` (empty when omitted) |
 | `position` | `top` or `bottom` |
 | `durationMs` | Duration in milliseconds (`-1` = never auto-dismiss) |
 | `color` | ARGB integer |
-| `icon` | `success`, `warning`, `error`, `info`, or `none` |
+| `textColor` | ARGB integer |
+| `icon` | `success`, `warning`, `error`, `info`, `offline`, or `none` |
 | `iconColor` | ARGB integer |
 | `dismissDirection` | `up` or `down` |
+| `closeButton` | `bool` |
+| `iconAnimation` | `bool` |
+
+Two more methods exist: `dismissToast` with an `id` argument, and `dismissAll` with no arguments.
 
 ### Android
 
@@ -198,7 +261,7 @@ Android code lives in:
 android/src/main/kotlin/dev/eqdevs/toast_native_dev/
 ```
 
-The plugin attaches a single `ComposeView` to the Activity `DecorView` and renders all active toasts from a `mutableStateListOf<ToastData>`.
+The plugin attaches a single `ComposeView` to the Activity `DecorView` when the first toast is shown, hides it while no toast is visible, and renders all active toasts from a `mutableStateListOf<ToastData>`.
 
 ### iOS
 

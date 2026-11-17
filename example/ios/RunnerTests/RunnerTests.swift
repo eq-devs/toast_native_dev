@@ -33,11 +33,13 @@ class RunnerTests: XCTestCase {
     ])
     XCTAssertEqual(payload.type, "success")
     XCTAssertEqual(payload.position, "top")
-    XCTAssertEqual(payload.duration, 2, accuracy: 0.0001)
+    XCTAssertEqual(payload.duration, 4, accuracy: 0.0001)
     XCTAssertEqual(payload.icon, "success")
     XCTAssertEqual(payload.dismissDirection, "up")
     XCTAssertNil(payload.colorARGB)
+    XCTAssertNil(payload.textColorARGB)
     XCTAssertNil(payload.iconColorARGB)
+    XCTAssertFalse(payload.closeButton)
   }
 
   func testBottomPositionDefaultsDismissDirectionDown() {
@@ -68,7 +70,13 @@ class RunnerTests: XCTestCase {
       "icon": "none",
       "iconColor": 0,
       "dismissDirection": "up",
+      "id": "network",
+      "textColor": 0xFF1A1A1A,
+      "closeButton": true,
     ])
+    XCTAssertEqual(payload.id, "network")
+    XCTAssertEqual(payload.textColorARGB, 0xFF1A1A1A)
+    XCTAssertTrue(payload.closeButton)
     XCTAssertEqual(payload.type, "error")
     XCTAssertEqual(payload.title, "Offline")
     XCTAssertEqual(payload.subtitle, "Try again")
@@ -78,6 +86,47 @@ class RunnerTests: XCTestCase {
     XCTAssertEqual(payload.icon, "none")
     XCTAssertEqual(payload.iconColorARGB, 0)
     XCTAssertEqual(payload.dismissDirection, "up")
+  }
+
+  func testMissingIdGetsUniqueFallback() {
+    let first = NativeToastPayload.parse(["title": "One"])
+    let second = NativeToastPayload.parse(["title": "Two"])
+    XCTAssertFalse(first.id.isEmpty)
+    XCTAssertNotEqual(first.id, second.id)
+  }
+
+  func testNeverDurationDefaultsToCloseButton() {
+    let payload = NativeToastPayload.parse(["title": "Pinned", "durationMs": -1])
+    XCTAssertTrue(payload.closeButton)
+  }
+
+  func testWarningDefaultsToDarkText() {
+    let warning = NativeToastPayload.parse(["type": "warning", "title": "Careful"])
+    let success = NativeToastPayload.parse(["type": "success", "title": "Saved"])
+    XCTAssertNotEqual(warning.resolvedTextColor, UIColor.white)
+    XCTAssertEqual(success.resolvedTextColor, UIColor.white)
+    XCTAssertEqual(warning.resolvedIconColor, UIColor.white)
+  }
+
+  func testIconAnimationDefaultsOnAndCanBeDisabled() {
+    XCTAssertTrue(NativeToastPayload.parse(["title": "Saved"]).iconAnimation)
+    XCTAssertFalse(
+      NativeToastPayload.parse(["title": "Saved", "iconAnimation": false]).iconAnimation)
+  }
+
+  func testDismissMethodsReturnNil() {
+    let plugin = NativeToastPlugin()
+    for call in [
+      FlutterMethodCall(methodName: "dismissToast", arguments: ["id": "missing"]),
+      FlutterMethodCall(methodName: "dismissAll", arguments: nil),
+    ] {
+      let done = expectation(description: call.method)
+      plugin.handle(call) { result in
+        XCTAssertNil(result)
+        done.fulfill()
+      }
+      wait(for: [done], timeout: 1)
+    }
   }
 
   func testIconFallsBackToType() {

@@ -15,22 +15,27 @@ enum NativeToastDismissDirection { up, down }
 class NativeToastIcon {
   const NativeToastIcon._(this.name, this.color);
 
-  const NativeToastIcon.success({Color color = const Color(0xffffffff)})
-      : this._('success', color);
+  /// Check mark in a circle.
+  const NativeToastIcon.success({Color? color}) : this._('success', color);
 
-  const NativeToastIcon.warning({Color color = const Color(0xffffffff)})
-      : this._('warning', color);
+  /// Exclamation mark in a circle.
+  const NativeToastIcon.warning({Color? color}) : this._('warning', color);
 
-  const NativeToastIcon.error({Color color = const Color(0xffffffff)})
-      : this._('error', color);
+  /// Cross in a circle.
+  const NativeToastIcon.error({Color? color}) : this._('error', color);
 
-  const NativeToastIcon.info({Color color = const Color(0xffffffff)})
-      : this._('info', color);
+  /// Letter "i" in a circle.
+  const NativeToastIcon.info({Color? color}) : this._('info', color);
+
+  /// Crossed-out WiFi symbol, for connectivity messages.
+  const NativeToastIcon.offline({Color? color}) : this._('offline', color);
 
   static const none = NativeToastIcon._('none', Color(0x00000000));
 
   final String name;
-  final Color color;
+
+  /// Icon color. When null the icon is white, the same on every toast type.
+  final Color? color;
 }
 
 class NativeToastLength {
@@ -51,23 +56,86 @@ class NativeToastLength {
 
 class NativeToastOptions {
   const NativeToastOptions({
-    this.position = ToastPosition.top,
-    this.length = NativeToastLength.short,
+    this.position,
+    this.length,
     this.bgColor,
+    this.textColor,
     this.icon,
     this.dismissDirection,
+    this.key,
+    this.showCloseButton,
+    this.animateIcon,
+  });
+
+  /// Screen edge. Falls back to [NativeToastDefaults.position].
+  final ToastPosition? position;
+
+  /// Auto-dismiss duration. Falls back to [NativeToastDefaults.length], then
+  /// to 6 seconds for errors and 4 seconds for every other type.
+  final NativeToastLength? length;
+
+  /// Background color. Falls back to [NativeToastDefaults.colors], then to the
+  /// built-in color for the toast type.
+  final Color? bgColor;
+
+  /// Title and subtitle color. When null, white or near-black is picked,
+  /// whichever contrasts more with the background.
+  final Color? textColor;
+
+  final NativeToastIcon? icon;
+  final NativeToastDismissDirection? dismissDirection;
+
+  /// Identifies the toast. Showing another toast with the same key updates the
+  /// one already on screen instead of adding a new one. The key is also the id
+  /// returned by [showToast].
+  final String? key;
+
+  /// Shows a close button. Defaults to true only for
+  /// [NativeToastLength.never] toasts.
+  final bool? showCloseButton;
+
+  /// Plays the icon's entrance animation (a springy pop while the glyph draws
+  /// itself). Falls back to [NativeToastDefaults.animateIcon], which is true.
+  final bool? animateIcon;
+}
+
+/// App-wide defaults applied by [showToast] when an option is not set.
+class NativeToastDefaults {
+  const NativeToastDefaults({
+    this.position = ToastPosition.top,
+    this.length,
+    this.colors = const {},
+    this.textColor,
+    this.animateIcon = true,
   });
 
   final ToastPosition position;
-  final NativeToastLength length;
-  final Color? bgColor;
-  final NativeToastIcon? icon;
-  final NativeToastDismissDirection? dismissDirection;
+
+  /// When null: 6 seconds for errors, 4 seconds for every other type.
+  final NativeToastLength? length;
+
+  /// Background color overrides per type.
+  final Map<ToastType, Color> colors;
+
+  /// When null, text color is picked per toast for best contrast.
+  final Color? textColor;
+
+  /// Whether icons play their entrance animation.
+  final bool animateIcon;
+}
+
+NativeToastDefaults _defaults = const NativeToastDefaults();
+
+/// Replaces the app-wide defaults used by [showToast].
+void setToastDefaults(NativeToastDefaults defaults) {
+  _defaults = defaults;
 }
 
 // ─── MethodChannel ────────────────────────────────────────────────────────────
 
 const _channel = MethodChannel('toast_native_dev/channel');
+
+int _nextId = 0;
 
 String _visibleText(String? value) {
   if (value == null) return '';
@@ -79,10 +147,13 @@ String _visibleText(String? value) {
 /// Shows a native toast above Flutter widgets and WebViews.
 ///
 /// [title] and [subtitle] are optional. A null or blank value is not drawn.
-/// If both are missing, this is a no-op.
+/// If both are missing, this is a no-op and returns null.
 ///
-/// Icon and background follow [type] unless [NativeToastOptions] overrides them.
-Future<void> showToast({
+/// Icon, background and text color follow [type] unless [NativeToastOptions]
+/// or [setToastDefaults] override them.
+///
+/// Returns the toast id, which can be passed to [dismissToast].
+Future<String?> showToast({
   required ToastType type,
   String? title,
   String? subtitle,
@@ -91,11 +162,12 @@ Future<void> showToast({
   final resolvedTitle = _visibleText(title);
   final resolvedSubtitle = _visibleText(subtitle);
   if (resolvedTitle.isEmpty && resolvedSubtitle.isEmpty) {
-    return;
+    return null;
   }
 
-  final resolvedPosition = options.position;
-  final resolvedLength = options.length;
+  final resolvedPosition = options.position ?? _defaults.position;
+  final resolvedLength =
+      options.length ?? _defaults.length ?? _defaultLengthFor(type);
   if (resolvedLength.durationMs <= 0 && resolvedLength.durationMs != -1) {
     throw ArgumentError.value(
       resolvedLength.durationMs,
@@ -107,23 +179,61 @@ Future<void> showToast({
       (resolvedPosition == ToastPosition.top
           ? NativeToastDismissDirection.up
           : NativeToastDismissDirection.down);
-  final resolvedColor = options.bgColor ?? _defaultColorFor(type);
+  final resolvedColor =
+      options.bgColor ?? _defaults.colors[type] ?? _defaultColorFor(type);
+  final resolvedTextColor = options.textColor ??
+      _defaults.textColor ??
+      _readableTextOn(resolvedColor);
   final resolvedIcon = options.icon ?? _defaultIconFor(type);
+  final resolvedIconColor = resolvedIcon.color ?? _lightText;
+  final id = options.key ?? 'toast_${++_nextId}';
 
   await _channel.invokeMethod('showToast', {
+    'id': id,
     'type': type.name,
     'title': resolvedTitle,
     'subtitle': resolvedSubtitle,
     'position': resolvedPosition.name,
     'durationMs': resolvedLength.durationMs,
     'color': resolvedColor.toARGB32(),
+    'textColor': resolvedTextColor.toARGB32(),
     'icon': resolvedIcon.name,
-    'iconColor': resolvedIcon.color.toARGB32(),
+    'iconColor': resolvedIconColor.toARGB32(),
     'dismissDirection': resolvedDismiss.name,
+    'closeButton': options.showCloseButton ?? (resolvedLength.durationMs == -1),
+    'iconAnimation': options.animateIcon ?? _defaults.animateIcon,
   });
+  return id;
+}
+
+/// Dismisses the toast with the given [id] (the value returned by
+/// [showToast], or its [NativeToastOptions.key]). Does nothing if that toast
+/// is already gone.
+Future<void> dismissToast(String id) async {
+  await _channel.invokeMethod('dismissToast', {'id': id});
+}
+
+/// Dismisses every visible toast.
+Future<void> dismissAllToasts() async {
+  await _channel.invokeMethod('dismissAll');
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const _lightText = Color(0xffffffff);
+const _darkText = Color(0xff1a1a1a);
+
+/// White or near-black, whichever has the higher WCAG contrast ratio on [bg].
+Color _readableTextOn(Color bg) {
+  final luminance = bg.computeLuminance();
+  final whiteContrast = 1.05 / (luminance + 0.05);
+  final darkContrast =
+      (luminance + 0.05) / (_darkText.computeLuminance() + 0.05);
+  return whiteContrast >= darkContrast ? _lightText : _darkText;
+}
+
+NativeToastLength _defaultLengthFor(ToastType type) =>
+    type == ToastType.error ? NativeToastLength.long : NativeToastLength.medium;
 
 NativeToastIcon _defaultIconFor(ToastType type) => switch (type) {
       ToastType.success => const NativeToastIcon.success(),
@@ -132,9 +242,10 @@ NativeToastIcon _defaultIconFor(ToastType type) => switch (type) {
       ToastType.info => const NativeToastIcon.info(),
     };
 
+// Each default reaches at least 4.5:1 contrast with its text color.
 Color _defaultColorFor(ToastType type) => switch (type) {
-      ToastType.success => const Color(0xff18A957),
+      ToastType.success => const Color(0xff0E7A3E),
       ToastType.warning => const Color(0xffF8B632),
-      ToastType.error => const Color(0xffFB2C36),
-      ToastType.info => const Color(0xff969696),
+      ToastType.error => const Color(0xffD11A2A),
+      ToastType.info => const Color(0xff2B2B2F),
     };

@@ -1,3 +1,44 @@
+## 0.1.0
+
+**Breaking / behaviour changes**
+
+* Default colors changed for contrast: success `#0E7A3E`, error `#D11A2A`, info `#2B2B2F`; warning keeps `#F8B632` but now uses dark text. Icons stay white on every type.
+* The warning icon is now an exclamation mark and the info icon a real "i". The WiFi glyph moved to the new `NativeToastIcon.offline`.
+* Default duration is 4 seconds (6 seconds for errors) instead of 2.
+* `NativeToastIcon.color`, `NativeToastOptions.position` and `NativeToastOptions.length` are now nullable. An icon without a color is white.
+* Title is limited to 2 lines and subtitle to 3. Toasts are at most 520pt wide.
+* Android: the newest bottom toast is now closest to the bottom edge, matching iOS and the README.
+
+**Added**
+
+* `showToast` returns the toast id; new `dismissToast(id)` and `dismissAllToasts()`.
+* `NativeToastOptions.key` (update a visible toast in place), `textColor`, and `showCloseButton` (on by default for `never` toasts).
+* `setToastDefaults` / `NativeToastDefaults` for app-wide position, duration, colors and text color.
+* Icon entrance animation with its own motion per type: success draws the check and bounces, error bursts the cross out and shakes, warning drops the "!" in and wobbles, info pops its dot and pulses, offline strikes the slash through. On by default; turn it off with `NativeToastOptions.animateIcon` or `NativeToastDefaults.animateIcon`.
+* Screen-reader announcements and a "Dismiss" accessibility action; Dynamic Type on iOS; Reduce Motion on iOS.
+* Bottom toasts stay above the keyboard; left and right safe-area insets are respected.
+
+**Motion and gestures**
+
+* Unified timing on both platforms: 300 ms enter, 200 ms exit, neighbours reflow at the same moment.
+* Exit follows `dismissDirection`. Swipe exits and spring-backs continue from the finger's velocity.
+* A fast flick dismisses before the threshold; releasing while moving back cancels.
+* Wrong-direction drags rubber-band; the toast fades as it nears the threshold with a haptic tick; it shrinks slightly while held.
+* After any touch the toast stays at least 1.5 seconds.
+
+**Fixed**
+
+* Android: the padded edge of a toast ignored touches and let taps through.
+* Android: dismissal was decided from raw finger travel instead of the visible position, and a second drag after a cancelled one no longer starts from the first drag's distance.
+* Android: bottom toasts could be drawn under the navigation bar on windows that are not edge-to-edge.
+* Android: the plugin no longer overwrites or clears lifecycle owners provided by the host activity, and its own owner follows the activity lifecycle.
+* iOS: visible toasts re-lay out on rotation and size changes; a toast can be grabbed again while it springs back.
+
+**Performance**
+
+* Android: the Compose overlay is created on the first toast instead of at activity start, and is hidden while empty.
+* iOS: toasts set an explicit `shadowPath`.
+
 ## 0.0.11
 
 * Match JP Notification: `success` / `error` / `warning` / `info` colors and the four type icons.

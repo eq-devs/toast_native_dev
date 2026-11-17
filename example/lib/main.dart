@@ -169,8 +169,20 @@ class _ToastTestLabState extends State<ToastTestLab> {
                 label: 'Info',
                 onPressed: () => showToast(
                   type: ToastType.info,
+                  title: 'Title',
+                  subtitle: 'Subtitle',
+                ),
+              ),
+              _ActionButton(
+                label: 'Offline',
+                onPressed: () => showToast(
+                  type: ToastType.info,
                   title: 'Интернет үзіліп қалды',
                   subtitle: 'Желіні тексеріп, қайта жүктеп көрiңіз',
+                  options: const NativeToastOptions(
+                    icon: NativeToastIcon.offline(),
+                    key: 'offline',
+                  ),
                 ),
               ),
               _ActionButton(
@@ -232,6 +244,14 @@ class _ToastTestLabState extends State<ToastTestLab> {
                   ),
                 ),
               ),
+              _ActionButton(
+                label: 'No icon motion',
+                onPressed: () => showToast(
+                  type: ToastType.success,
+                  title: 'Icon shown without animation',
+                  options: const NativeToastOptions(animateIcon: false),
+                ),
+              ),
             ],
           ),
           _Section(
@@ -260,6 +280,31 @@ class _ToastTestLabState extends State<ToastTestLab> {
               _ActionButton(
                 label: 'Mixed Stack 8',
                 onPressed: _runMixedStack,
+              ),
+            ],
+          ),
+          _Section(
+            title: 'Dismiss',
+            children: [
+              _ActionButton(
+                label: 'Pinned with close button',
+                onPressed: () => showToast(
+                  type: ToastType.info,
+                  title: 'Pinned toast',
+                  subtitle: 'Tap the cross, swipe, or use the buttons here',
+                  options: const NativeToastOptions(
+                    length: NativeToastLength.never,
+                    key: 'pinned',
+                  ),
+                ),
+              ),
+              _ActionButton(
+                label: 'Dismiss pinned',
+                onPressed: () => dismissToast('pinned'),
+              ),
+              const _ActionButton(
+                label: 'Dismiss all',
+                onPressed: dismissAllToasts,
               ),
             ],
           ),
