@@ -1,3 +1,7 @@
+## 0.1.2
+
+* Restored the horizontal layout from 0.1.0: 14pt side margin and 520pt max width. The 60pt minimum height from 0.1.1 stays.
+
 ## 0.1.1
 
 * Toast size now follows the design: at least 60pt tall with centred content, at most 370pt wide (was 520pt), with a 10pt minimum side margin (was 14pt).

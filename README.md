@@ -21,7 +21,7 @@ Touches outside the toast pass through to the Flutter app, so the page remains u
 
 ```yaml
 dependencies:
-  toast_native_dev: ^0.1.1
+  toast_native_dev: ^0.1.2
 ```
 
 ```dart
@@ -204,7 +204,7 @@ The whole motion takes one second and is identical on Android and iOS. Set `anim
 - Any number of toasts can be visible at once; each one shows immediately.
 - Top toasts stack downward; bottom toasts stack upward with the newest closest to the edge.
 - Neighbours slide into place at the same moment a toast enters or leaves.
-- Toasts are at most 370pt wide and centered with at least a 10pt side margin, at least 60pt tall, respect all safe-area insets, and bottom toasts stay above the keyboard.
+- Toasts are at most 520pt wide and centered, at least 60pt tall, respect all safe-area insets, and bottom toasts stay above the keyboard.
 - Taps outside a toast pass through to the app.
 
 ## Accessibility

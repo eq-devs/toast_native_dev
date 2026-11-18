@@ -105,9 +105,8 @@ private val EnterEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 private val ExitEasing = CubicBezierEasing(0.3f, 0f, 1f, 1f)
 
 private val ToastGap = 8.dp
-private val ToastEdgeMargin = 14.dp     // top and bottom
-private val ToastSideMargin = 10.dp     // minimum, on screens narrower than max width + 20
-private val ToastMaxWidth = 370.dp
+private val ToastEdgeMargin = 14.dp
+private val ToastMaxWidth = 520.dp
 private val ToastMinHeight = 60.dp
 private val ToastDismissThreshold = 56.dp
 private val ToastFlickVelocity = 800.dp     // per second, toward the dismiss edge
@@ -162,7 +161,7 @@ fun ToastOverlay(
                         WindowInsetsSides.Top + WindowInsetsSides.Horizontal
                     )
                 )
-                .padding(top = ToastEdgeMargin, start = ToastSideMargin, end = ToastSideMargin)
+                .padding(top = ToastEdgeMargin, start = ToastEdgeMargin, end = ToastEdgeMargin)
                 .widthIn(max = ToastMaxWidth)
                 .fillMaxWidth(),
         ) {
@@ -182,7 +181,7 @@ fun ToastOverlay(
                         WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal
                     )
                 )
-                .padding(bottom = ToastEdgeMargin, start = ToastSideMargin, end = ToastSideMargin)
+                .padding(bottom = ToastEdgeMargin, start = ToastEdgeMargin, end = ToastEdgeMargin)
                 .widthIn(max = ToastMaxWidth)
                 .fillMaxWidth(),
         ) {

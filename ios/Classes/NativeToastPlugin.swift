@@ -13,10 +13,9 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
     private var keyboardFrame: CGRect = .null
 
     // Layout — kept in sync with the Android renderer.
-    private let edgeMargin: CGFloat = 14     // top and bottom
-    private let sideMargin: CGFloat = 10     // minimum, on screens narrower than max width + 20
+    private let edgeMargin: CGFloat = 14
     private let toastGap: CGFloat = 8
-    private let maxToastWidth: CGFloat = 370
+    private let maxToastWidth: CGFloat = 520
     private let minToastHeight: CGFloat = 60
 
     // Motion spec — kept in sync with the Android renderer.
@@ -241,7 +240,7 @@ public class NativeToastPlugin: NSObject, FlutterPlugin, UIGestureRecognizerDele
         }
 
         return StackMetrics(
-            width: max(0, min(safeWidth - sideMargin * 2, maxToastWidth)),
+            width: max(0, min(safeWidth - edgeMargin * 2, maxToastWidth)),
             centerX: safe.left + safeWidth / 2,
             top: safe.top + edgeMargin,
             bottom: bounds.height - max(safe.bottom, keyboardOverlap) - edgeMargin
