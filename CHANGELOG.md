@@ -1,3 +1,7 @@
+## 0.1.3
+
+* iOS: fixed the icon and text sliding in from the card's edge during the first frames of the entrance, and a toast that could be measured too tall, both caused by the status-bar safe area leaking into the content padding.
+
 ## 0.1.2
 
 * Restored the horizontal layout from 0.1.0: 14pt side margin and 520pt max width. The 60pt minimum height from 0.1.1 stays.

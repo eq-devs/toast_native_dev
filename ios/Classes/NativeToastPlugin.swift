@@ -635,6 +635,11 @@ private final class ToastView: UIView {
         contentStack.spacing = 12
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         contentStack.isLayoutMarginsRelativeArrangement = true
+        // The padding is fixed. Without this, a toast whose frame overlaps the
+        // status bar (before it is placed, or mid-transition) adds the safe
+        // area to its padding, which shifts the content and inflates the
+        // measured height.
+        contentStack.insetsLayoutMarginsFromSafeArea = false
         contentStack.directionalLayoutMargins = NSDirectionalEdgeInsets(
             top: 12, leading: 16, bottom: 12, trailing: 16
         )
