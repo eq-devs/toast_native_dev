@@ -1,3 +1,7 @@
+## 0.1.1
+
+* Toast size now follows the design: at least 60pt tall with centred content, at most 370pt wide (was 520pt), with a 10pt minimum side margin (was 14pt).
+
 ## 0.1.0
 
 **Breaking / behaviour changes**

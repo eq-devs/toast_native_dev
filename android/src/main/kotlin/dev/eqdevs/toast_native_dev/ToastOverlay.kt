@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
@@ -104,8 +105,10 @@ private val EnterEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 private val ExitEasing = CubicBezierEasing(0.3f, 0f, 1f, 1f)
 
 private val ToastGap = 8.dp
-private val ToastEdgeMargin = 14.dp
-private val ToastMaxWidth = 520.dp
+private val ToastEdgeMargin = 14.dp     // top and bottom
+private val ToastSideMargin = 10.dp     // minimum, on screens narrower than max width + 20
+private val ToastMaxWidth = 370.dp
+private val ToastMinHeight = 60.dp
 private val ToastDismissThreshold = 56.dp
 private val ToastFlickVelocity = 800.dp     // per second, toward the dismiss edge
 private val ToastReverseVelocity = 100.dp   // per second, back toward rest
@@ -159,7 +162,7 @@ fun ToastOverlay(
                         WindowInsetsSides.Top + WindowInsetsSides.Horizontal
                     )
                 )
-                .padding(top = ToastEdgeMargin, start = ToastEdgeMargin, end = ToastEdgeMargin)
+                .padding(top = ToastEdgeMargin, start = ToastSideMargin, end = ToastSideMargin)
                 .widthIn(max = ToastMaxWidth)
                 .fillMaxWidth(),
         ) {
@@ -179,7 +182,7 @@ fun ToastOverlay(
                         WindowInsetsSides.Bottom + WindowInsetsSides.Horizontal
                     )
                 )
-                .padding(bottom = ToastEdgeMargin, start = ToastEdgeMargin, end = ToastEdgeMargin)
+                .padding(bottom = ToastEdgeMargin, start = ToastSideMargin, end = ToastSideMargin)
                 .widthIn(max = ToastMaxWidth)
                 .fillMaxWidth(),
         ) {
@@ -411,6 +414,9 @@ private fun ToastItem(
                 liveRegion = LiveRegionMode.Polite
                 dismiss { onDismiss(); true }
             }
+            // A one-line toast is ToastMinHeight tall with its content centred;
+            // taller content grows past it.
+            .heightIn(min = ToastMinHeight)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
