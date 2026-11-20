@@ -78,8 +78,9 @@ class NativeToastOptions {
   /// built-in color for the toast type.
   final Color? bgColor;
 
-  /// Title and subtitle color. When null, white or near-black is picked,
-  /// whichever contrasts more with the background.
+  /// Title and subtitle color. When null, the text is white on the built-in
+  /// type colors; on a custom background, white or near-black is picked,
+  /// whichever contrasts more with it.
   final Color? textColor;
 
   final NativeToastIcon? icon;
@@ -117,7 +118,8 @@ class NativeToastDefaults {
   /// Background color overrides per type.
   final Map<ToastType, Color> colors;
 
-  /// When null, text color is picked per toast for best contrast.
+  /// When null, text is white on the built-in type colors and picked for best
+  /// contrast on a custom background.
   final Color? textColor;
 
   /// Whether icons play their entrance animation.
@@ -179,11 +181,13 @@ Future<String?> showToast({
       (resolvedPosition == ToastPosition.top
           ? NativeToastDismissDirection.up
           : NativeToastDismissDirection.down);
-  final resolvedColor =
-      options.bgColor ?? _defaults.colors[type] ?? _defaultColorFor(type);
+  final customColor = options.bgColor ?? _defaults.colors[type];
+  final resolvedColor = customColor ?? _defaultColorFor(type);
+  // The design uses white text on every built-in color; only a custom
+  // background gets its text color picked by contrast.
   final resolvedTextColor = options.textColor ??
       _defaults.textColor ??
-      _readableTextOn(resolvedColor);
+      (customColor == null ? _lightText : _readableTextOn(customColor));
   final resolvedIcon = options.icon ?? _defaultIconFor(type);
   final resolvedIconColor = resolvedIcon.color ?? _lightText;
   final id = options.key ?? 'toast_${++_nextId}';
@@ -242,10 +246,10 @@ NativeToastIcon _defaultIconFor(ToastType type) => switch (type) {
       ToastType.info => const NativeToastIcon.info(),
     };
 
-// Each default reaches at least 4.5:1 contrast with its text color.
+// The design-system palette; every one is paired with white text.
 Color _defaultColorFor(ToastType type) => switch (type) {
-      ToastType.success => const Color(0xff0E7A3E),
+      ToastType.success => const Color(0xff18A957),
       ToastType.warning => const Color(0xffF8B632),
-      ToastType.error => const Color(0xffD11A2A),
-      ToastType.info => const Color(0xff2B2B2F),
+      ToastType.error => const Color(0xffFB2C36),
+      ToastType.info => const Color(0xff969696),
     };

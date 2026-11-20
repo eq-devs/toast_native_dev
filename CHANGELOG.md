@@ -1,3 +1,8 @@
+## 0.1.4
+
+* Toasts follow the JP Design System again: success `#18A957`, error `#FB2C36`, warning `#F8B632`, info `#969696`, with white text on every type. A custom background still gets its text color picked by contrast.
+* The info icon's "i" matches the design (dot at y=8, stem from 11 to 17).
+
 ## 0.1.3
 
 * iOS: fixed the icon and text sliding in from the card's edge during the first frames of the entrance, and a toast that could be measured too tall, both caused by the status-bar safe area leaking into the content padding.

@@ -98,18 +98,15 @@ public struct NativeToastPayload {
 
     public static func defaultBackground(for type: String) -> UIColor {
         switch type {
-        case "success": return UIColor(red: 14/255, green: 122/255, blue: 62/255, alpha: 1)
-        case "error":   return UIColor(red: 209/255, green: 26/255, blue: 42/255, alpha: 1)
-        case "info":    return UIColor(red: 43/255, green: 43/255, blue: 47/255, alpha: 1)
+        case "success": return UIColor(red: 24/255, green: 169/255, blue: 87/255, alpha: 1)
+        case "error":   return UIColor(red: 251/255, green: 44/255, blue: 54/255, alpha: 1)
+        case "info":    return UIColor(red: 150/255, green: 150/255, blue: 150/255, alpha: 1)
         default:        return UIColor(red: 248/255, green: 182/255, blue: 50/255, alpha: 1)
         }
     }
 
-    /// The yellow warning background needs dark text to stay readable.
+    /// The design uses white text on every type.
     public static func defaultText(for type: String) -> UIColor {
-        switch type {
-        case "success", "error", "info": return .white
-        default: return UIColor(red: 26/255, green: 26/255, blue: 26/255, alpha: 1)
-        }
+        return .white
     }
 }

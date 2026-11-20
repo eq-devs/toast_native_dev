@@ -457,17 +457,15 @@ private fun ToastItem(
 }
 
 private fun defaultBackground(type: String): Long = when (type) {
-    "success" -> 0xFF0E7A3E
-    "error" -> 0xFFD11A2A
-    "info" -> 0xFF2B2B2F
+    "success" -> 0xFF18A957
+    "error" -> 0xFFFB2C36
+    "info" -> 0xFF969696
     else -> 0xFFF8B632
 }
 
-// The yellow warning background needs dark text to stay readable.
-private fun defaultText(type: String): Long = when (type) {
-    "success", "error", "info" -> 0xFFFFFFFF
-    else -> 0xFF1A1A1A
-}
+// The design uses white text on every type.
+@Suppress("UNUSED_PARAMETER")
+private fun defaultText(type: String): Long = 0xFFFFFFFF
 
 private val toastTitleStyle = TextStyle(
     color = Color.White,
@@ -669,9 +667,9 @@ private fun DrawScope.drawExclamationGlyph(color: Color, ms: Float) {
 // "i" — the dot pops first, then the stem grows down from it.
 private fun DrawScope.drawInfoGlyph(color: Color, ms: Float) {
     val dot = easeOutBack(seg(ms, 200f, 360f)).coerceAtLeast(0f)
-    drawCircle(color, radius = dot, center = Offset(12f, 7.75f))
+    drawCircle(color, radius = dot, center = Offset(12f, 8f))
     drawPartialLine(
-        color, Offset(12f, 11f), Offset(12f, 16.5f), easeOutCubic(seg(ms, 300f, 520f)),
+        color, Offset(12f, 11f), Offset(12f, 17f), easeOutCubic(seg(ms, 300f, 520f)),
     )
 }
 

@@ -21,7 +21,7 @@ Touches outside the toast pass through to the Flutter app, so the page remains u
 
 ```yaml
 dependencies:
-  toast_native_dev: ^0.1.3
+  toast_native_dev: ^0.1.4
 ```
 
 ```dart
@@ -44,7 +44,7 @@ Default behavior:
 | Position | `ToastPosition.top` |
 | Duration | 4 seconds; 6 seconds for `ToastType.error` |
 | Background | Based on `ToastType` |
-| Text color | White or near-black, whichever contrasts more with the background |
+| Text color | White on the built-in colors; on a custom background, white or near-black, whichever contrasts more |
 | Icon | Based on `ToastType`, white on every type |
 | Icon animation | On: each icon type plays its own entrance motion |
 | Dismiss direction | `up` for top, `down` for bottom |
@@ -110,12 +110,12 @@ setToastDefaults(const NativeToastDefaults(
 
 | Value | Default color | Default icon |
 |---|---:|---|
-| `ToastType.success` | `0xff0E7A3E` | Check circle |
-| `ToastType.error` | `0xffD11A2A` | Close circle |
-| `ToastType.warning` | `0xffF8B632` (dark text) | Exclamation circle |
-| `ToastType.info` | `0xff2B2B2F` | Info circle |
+| `ToastType.success` | `0xff18A957` | Check circle |
+| `ToastType.error` | `0xffFB2C36` | Close circle |
+| `ToastType.warning` | `0xffF8B632` | Exclamation circle |
+| `ToastType.info` | `0xff969696` | Info circle |
 
-Every default reaches at least 4.5:1 contrast between text and background.
+These are the design-system colors, all with white text. White on the yellow and gray backgrounds is below 4.5:1 contrast; pass `textColor` (or set it in `setToastDefaults`) if you need it higher.
 
 ### `NativeToastOptions`
 
@@ -124,7 +124,7 @@ Every default reaches at least 4.5:1 contrast between text and background.
 | `position` | `ToastPosition?` | `ToastPosition.top` | Shows the toast at the top or bottom. |
 | `length` | `NativeToastLength?` | 4 s, 6 s for errors | Auto-dismiss duration. |
 | `bgColor` | `Color?` | Type color | Overrides the default background color. |
-| `textColor` | `Color?` | Best contrast | Title and subtitle color. |
+| `textColor` | `Color?` | White (best contrast on a custom `bgColor`) | Title and subtitle color. |
 | `icon` | `NativeToastIcon?` | Type icon | Overrides or hides the icon. |
 | `dismissDirection` | `NativeToastDismissDirection?` | Based on position | Drag direction that dismisses the toast. Timed exits slide the same way. |
 | `key` | `String?` | None | Showing a toast with a key that is already visible updates that toast instead of adding another. |

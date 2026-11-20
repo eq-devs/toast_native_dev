@@ -993,9 +993,9 @@ private class ToastIconView: UIView {
             )
             addDot(center: CGPoint(x: 12, y: 16.25))
         default:
-            addDot(center: CGPoint(x: 12, y: 7.75))
+            addDot(center: CGPoint(x: 12, y: 8))
             strokeLayers.append(addStroke(
-                linePath([CGPoint(x: 12, y: 11), CGPoint(x: 12, y: 16.5)]), color: glyphColor
+                linePath([CGPoint(x: 12, y: 11), CGPoint(x: 12, y: 17)]), color: glyphColor
             ))
         }
     }

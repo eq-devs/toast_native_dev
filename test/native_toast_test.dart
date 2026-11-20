@@ -36,7 +36,7 @@ void main() {
       'subtitle': '',
       'position': 'top',
       'durationMs': 4000,
-      'color': 0xff0e7a3e,
+      'color': 0xff18a957,
       'textColor': 0xffffffff,
       'icon': 'success',
       'iconColor': 0xffffffff,
@@ -63,10 +63,10 @@ void main() {
     expect(calls.single.arguments, containsPair('color', 0xfff8b632));
   });
 
-  test('warning uses dark text but keeps the white icon of every other type',
+  test('warning uses white text and the white icon of every other type',
       () async {
     await showToast(type: ToastType.warning, title: 'Careful');
-    expect(calls.single.arguments, containsPair('textColor', 0xff1a1a1a));
+    expect(calls.single.arguments, containsPair('textColor', 0xffffffff));
     expect(calls.single.arguments, containsPair('iconColor', 0xffffffff));
   });
 
@@ -76,10 +76,10 @@ void main() {
     expect(calls.single.arguments, containsPair('iconAnimation', false));
   });
 
-  test('info type uses the dark neutral color and the info icon', () async {
+  test('info type uses the gray neutral color and the info icon', () async {
     await showToast(type: ToastType.info, title: 'Heads up');
     expect(calls.single.arguments, containsPair('type', 'info'));
-    expect(calls.single.arguments, containsPair('color', 0xff2b2b2f));
+    expect(calls.single.arguments, containsPair('color', 0xff969696));
     expect(calls.single.arguments, containsPair('textColor', 0xffffffff));
     expect(calls.single.arguments, containsPair('icon', 'info'));
   });
@@ -144,7 +144,16 @@ void main() {
     });
   });
 
-  test('text color follows the background when not set', () async {
+  test('built-in colors use white text on every type', () async {
+    for (final type in ToastType.values) {
+      await showToast(type: type, title: type.name);
+    }
+    for (final call in calls) {
+      expect(call.arguments, containsPair('textColor', 0xffffffff));
+    }
+  });
+
+  test('text color follows a custom background when not set', () async {
     await showToast(
       type: ToastType.success,
       title: 'Light',
